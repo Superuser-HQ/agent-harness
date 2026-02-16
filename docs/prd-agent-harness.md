@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** Draft v0.1
+**Status:** Draft v0.2
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -35,9 +35,9 @@ Sessions are tree-structured, not flat history. Agents can branch (sub-tasks, re
 - **Branch sessions** — sub-tasks, side-quests, background work
 - **Session handoff** — state dump to file before context resets (solves the "cold pickup" problem)
 
-### 4.2 Base Tools (6 primitives)
+### 4.2 Base Tools (5 primitives)
 
-The core ships with exactly 6 tools. Everything else is an extension.
+The core ships with exactly 5 tools. Everything else is an extension.
 
 | Tool | Purpose |
 |------|---------|
@@ -46,7 +46,8 @@ The core ships with exactly 6 tools. Everything else is an extension.
 | **Edit** | Surgical text replacement |
 | **Shell** | Execute commands, manage processes |
 | **Message** | Send/receive across surfaces (Slack, Telegram, Signal, etc.) |
-| **Memory** | Read/write persistent memory (daily logs, long-term, tagged solutions) |
+
+Memory is an **architectural layer**, not a tool (see 4.5). Tools interact with memory through Read/Write (files) and a thin `remember`/`recall` API.
 
 ### 4.3 Extension/Skill System
 
@@ -79,11 +80,30 @@ Memory is git-backed. Multiple agents read/write via shared repo with convention
 - **Custom lint error messages** — include remediation instructions so agents self-fix
 - **Recurring cleanup agents** — scan for drift, open fix-up PRs (garbage collection pattern)
 
+**Starter enforcement rules (v1):**
+1. No direct LLM API calls outside the abstraction layer
+2. Every skill must have SKILL.md with `name`, `description`, and `tools` fields
+3. No tool can write outside workspace without explicit permission
+
+### 4.7 Error Handling & Resilience
+
+- **Retry with backoff** — automatic retry on transient failures (rate limits, network errors)
+- **Provider failover** — if provider X is down, fall back to provider Y automatically
+- **Session recovery** — checkpoint session state; recover from crashes without losing context
+- **Graceful degradation** — reduced capability beats total failure (e.g., fall back to simpler model if primary unavailable)
+- **Abort support** — clean cancellation of in-progress tool calls with partial result preservation
+
 ## 5. Multi-Agent Primitives (Phase 2 core)
 
 ### 5.1 Agent-to-Agent Communication
 
-- **Direct RPC** — structured message passing between agents (not just Slack relay)
+Two channels, by design:
+
+- **RPC layer** — structured data transfer between agents (task handoffs, results, typed payloads). Logged but not surfaced to humans by default.
+- **Coordination layer** — messaging surface (Slack, etc.) for decisions, status updates, and human-visible collaboration. Humans see what agents are deciding.
+
+Think: Slack is the standup, RPC is the API call.
+
 - **Handoff protocol** — typed task handoffs with context, constraints, and expected output format
 - **Shared artifacts via git** — code and specs through PRs, coordination through messaging
 
@@ -130,24 +150,31 @@ Channel-agnostic messaging is OpenClaw's killer feature. Preserve it.
 3. Feature parity with OpenClaw features we actually use (end of week 6)
 4. All SHQ agent operations migrated off OpenClaw (end of week 8)
 
-## 10. Open Questions
+## 10. Key Decisions & Open Questions
 
-1. **Language/runtime?** Node.js (matches OpenClaw), Rust (performance), or Python (ecosystem)?
-2. **Name?** Working title TBD
-3. **License?** Apache 2.0? MIT? AGPL?
-4. **Foundation vs SHQ-owned?** Open governance from day 1, or SHQ-controlled with open contributions?
-5. **Codex/Claude Code as the agent runtime?** Or build our own agent loop?
+### Resolved (Kani + Rem aligned, pending human approval):
+- **Language/runtime:** TypeScript/Node.js — matches OpenClaw, zero ramp-up, strong ecosystem
+- **License:** Apache 2.0 — permissive with patent protection
+- **Governance:** SHQ-owned to start, foundation later if traction warrants
+
+### Critical Fork (needs human decision):
+- **Build own agent loop vs wrap pi-agent-core?** Pi gives us session trees + multi-provider + extension hot-reload for free. But Pi is terminal-first; we need messaging-first. Needs validation that it fits before committing. This is THE architectural decision.
+
+### Open:
+- **Name?** Working title TBD. Short, memorable, not taken on npm.
+- **Messaging adapter architecture?** How do we abstract Slack/Telegram/Signal cleanly? Port OpenClaw's adapter pattern or design fresh?
 
 ## 11. Timeline
 
 | Week | Milestone |
 |------|-----------|
 | 1 | Audit: what OpenClaw features we actually use + gap analysis |
-| 2 | Design doc: this PRD refined + architecture decisions |
+| 2 | Design doc: PRD refined + architecture decisions (critical fork resolved) |
 | 3 | Prototype: single agent on new core, one surface |
 | 4 | Multi-agent: two agents collaborating through new system |
-| 5-6 | Feature parity with used OpenClaw features |
-| 7-8 | Migration: move SHQ operations to new system |
+| 5 | Dogfood: run one real SHQ task end-to-end, discover what's broken |
+| 6-7 | Feature parity with used OpenClaw features (informed by dogfood) |
+| 8-9 | Migration: move SHQ operations to new system |
 
 ---
 
