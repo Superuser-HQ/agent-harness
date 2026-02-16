@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.5
+**Status:** v1.6
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -767,6 +767,65 @@ Tests are not Phase 2. The golden path E2E ships with the first prototype (Week 
 | 5 | Memory: vector index over memory files. Compound capture loop. Dogfood one real SHQ task end-to-end. |
 | 6-7 | Feature parity with used OpenClaw features (informed by dogfood). Second messaging surface. |
 | 8-9 | Migration: move SHQ operations to new system. Retrospective ADR on what worked/didn't. |
+
+---
+
+## 21. Uncaptured Research Patterns
+
+These patterns emerged from our 9-framework audit but aren't yet woven into the architecture sections above. Each is validated by at least one production framework. They form a checklist for implementation — some are v1, some are later phases.
+
+### 21.1 Context Compression (OpenHands, Pi/mom)
+
+When sessions exceed the context window, automatically summarize older turns to preserve the most relevant information. Pi-mom uses a `log.jsonl` (full history, source of truth) + `context.jsonl` (what the LLM sees) split, with compaction when context grows too large. OpenHands applies aggressive context compression to keep agents functional across long tasks. Without this, agents degrade silently — they lose early context and start making mistakes they wouldn't make with full history. This belongs in §4.1 (Session Model) and should be a v1 feature, not an optimization. The compaction strategy matters: summarize tool outputs more aggressively than human instructions, preserve decisions and their rationale, and always keep the system prompt and recent turns intact.
+
+### 21.2 Validation-Retry Loop (Pydantic AI)
+
+When tool arguments fail schema validation, send the validation error back to the LLM for self-correction instead of failing hard. Pydantic AI does this with Zod/Pydantic schemas — if the agent produces malformed tool calls, the error message becomes part of the next prompt, and the agent fixes its own mistake. This is a small implementation detail with outsized impact on reliability. The PRD mentions Zod/TypeBox validation (§4.4) but doesn't specify this retry behavior. Should be default in the tool execution layer — configurable max retries (default: 3), with the validation error formatted to help the LLM understand what went wrong.
+
+### 21.3 Structured Output Guarantee (Pydantic AI)
+
+Beyond validating tool *inputs*, the harness should support validating agent *outputs*. When a task requires structured data (JSON, typed objects), the agent retries until its output matches the expected schema. This is the "harness-first" principle (§3.1) applied to outputs — the scaffolding guarantees correctness, not the LLM's good behavior. Useful for: API responses, data extraction, structured reports, and any agent-to-agent communication where the receiving agent expects a typed payload.
+
+### 21.4 Deferred Approval Pattern (Pydantic AI)
+
+The current approval gates (§5.3) block the agent until a human responds. Pydantic AI has a better pattern: tools can return "pending human approval" as a first-class result type. The agent acknowledges the pending action and continues working on non-blocked tasks. When the human approves, the deferred action executes and results flow back into the agent's context. This is strictly better than blocking — the agent stays productive while waiting for approval, and humans don't feel pressured to respond immediately.
+
+### 21.5 Action/Observation Formalism (OpenHands)
+
+OpenHands separates agent behavior into Actions (what the agent wants to do) and Observations (what the environment reports back). This is more formal than "tools return results" and creates a clean audit trail: every agent turn produces a list of Actions, each Action produces an Observation, and the full Action→Observation chain is logged, replayable, and analyzable. This maps naturally to our audit logging (§14) and replay tests (§19). Worth adopting as the internal execution model even if the surface API stays simple.
+
+### 21.6 Typed Dependency Injection (Pydantic AI)
+
+Tools need runtime context — database connections, API clients, user identity, configuration. Pydantic AI's `RunContext[Deps]` pattern passes these as typed dependencies rather than global state or environment variables. In TypeScript, this becomes generic tool definitions: `Tool<Deps>` where `Deps` is a typed object injected at runtime. This matters for testing (inject mocks instead of real services), for multi-tenant setups (different deps per user), and for security (tools only see the deps they're given, not everything in the environment).
+
+### 21.7 Custom Agent Distributions (Goose)
+
+Goose supports "custom distributions" — pre-configured agent profiles with specific tools, extensions, and system prompts baked in. This maps to our Kani family pattern (personas) and specialized roles (§7.3), but Goose packages them as shareable, installable configurations. A `harness create --template research` or `harness create --template dev-lead` would dramatically improve onboarding. Templates are just config bundles (SOUL.md + AGENTS.md + GUARDRAILS.yaml + default skills) in a git repo or registry. The harness ships with a few starter templates; teams create their own.
+
+### 21.8 Remote Skill Discovery (nanobot)
+
+nanobot agents can read a skill from a URL and self-configure — no manual installation. The agent is told "read https://example.com/skill.md and follow the instructions," and it does. This is lighter than a marketplace and more flexible than bundled skills. For our harness, a curated skill registry (even just a JSON file mapping skill names to git URLs) gives agents discoverability without infrastructure. The agent can `harness skill add <url>`, which clones the skill repo into the workspace and registers it. Remote skills are untrusted by default (§6.2 extension vetting applies).
+
+### 21.9 Workflow Engine with Suspend/Resume (Mastra)
+
+Mastra's workflow system is graph-based: define steps, connect them with edges, add conditional branching and human checkpoints. Crucially, workflows can suspend (waiting for human input, external event, or timer) and resume without losing state. The PRD mentions proactive automation (§11) but doesn't address complex multi-step workflows that span hours or days. For v1, simple cron + heartbeat is enough. But the architecture should anticipate durable workflows — a research task that runs overnight, pauses for human review in the morning, then continues based on feedback. The session tree model (§4.1) naturally supports this if branches can be suspended and resumed.
+
+### 21.10 Benchmark-Driven Development (OpenHands)
+
+OpenHands tracks performance against SWE-bench, giving them a quantitative regression safety net. We should define our equivalent from day one. Not a massive benchmark suite — just 10-15 standard scenarios that cover the critical paths:
+
+1. Receive message → process → respond (basic round-trip)
+2. Branch session → complete task → merge results back
+3. Recover from crash mid-task (session recovery)
+4. Capture decision via emoji trigger (ADR flow)
+5. Respect guardrail boundary (refuse elevated action without permission)
+6. Compress context without losing critical information
+7. Multi-agent handoff (agent A delegates to agent B, gets result)
+8. Cost tracking accuracy (reported cost matches actual API spend)
+9. Memory write → vector index → semantic recall
+10. Error communication (fail gracefully, explain clearly)
+
+Run these on every PR. If a scenario regresses, the PR doesn't merge. This is the "mechanical enforcement" principle (§3.3) applied to the harness itself.
 
 ---
 
