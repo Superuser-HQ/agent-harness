@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.1
+**Status:** v1.2
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -244,51 +244,51 @@ Channel-agnostic messaging is our **core differentiator** — no existing framew
 
 ---
 
-## 7. GitHub as Collaboration Interface
+## 7. Collaboration Interface
 
-GitHub is the collaboration surface for both humans and agents. No Notion, no external tools.
+### 7.1 Two Layers: Repo-Local + External Adapters
 
-### 7.1 Primitives
+The same principle that drives our messaging abstraction (§6) applies to project management: **don't hardcode GitHub, Linear, or Jira — abstract them.**
 
-| GitHub Feature | Use Case |
-|---|---|
-| **Discussions** | RFCs, design decisions, architectural debates. Threaded, searchable, linkable. |
-| **Issues** | Tasks, bugs, feature requests. Agents can create, assign, and close issues. |
-| **Projects** | Kanban/timeline tracking. Agents update status as they work. |
-| **PRs** | Code review, documentation changes. Agents author and review PRs. |
-| **ADRs** (`docs/adr/`) | Decision records (see §8). |
+| Layer | What | Examples |
+|---|---|---|
+| **Repo-local (always available)** | Task files, ADRs, backlog — works offline, no API needed | [Backlog.md](https://github.com/MrLesk/Backlog.md), `docs/adr/` |
+| **PM adapter (pluggable)** | Syncs repo-local tasks to external trackers | GitHub Issues, Linear, Jira |
 
-### 7.2 Conventions
+The harness depends on the repo-local layer only. PM adapters are optional plugins that sync outward.
 
-- **Agents are first-class GitHub citizens** — they have GitHub accounts, author PRs, comment on issues, participate in discussions.
-- **`backlog.md`** at repo root tracks near-term work (replaces external task trackers). **Ownership rule:** the agent _assigned_ to a task updates its status. Unassigned items are updated by whoever picks them up. This prevents merge conflicts from multiple agents editing simultaneously.
-- **Labels** distinguish human-created vs agent-created issues (`source:human`, `source:agent`).
-- **Templates** for issues and PRs enforce structure (required fields, checklists).
+### 7.2 Repo-Local Task Management (Backlog.md)
 
-### 7.3 Repo-Native Task Tracking
+[Backlog.md](https://github.com/MrLesk/Backlog.md) is the agent-native task layer:
 
-Instead of Notion or Jira:
+- **Each task = individual markdown file** in `backlog/` → zero merge conflicts by design
+- **AI-native** — MCP + CLI integration, agents create/pick up/complete tasks naturally
+- **Kanban board** in terminal (`backlog board`) or web (`backlog browser`)
+- **100% repo-local, git-friendly** — no API keys, no external dependencies
+- **Ownership rule:** the agent _assigned_ to a task updates its status. Unassigned items are updated by whoever picks them up.
 
-```markdown
-# backlog.md
+This is the source of truth for day-to-day agent work. Always available, even offline.
 
-## In Progress
-- [ ] #42 Channel adapter for Telegram (@kani)
-- [ ] #43 Memory policy enforcement linter (@rem)
+### 7.3 PM Adapters (Phase 2)
 
-## Ready
-- [ ] #44 Vector index rebuild on push
-- [ ] #45 ADR template + CLI helper
+Optional adapters sync Backlog.md tasks to external project management tools:
 
-## Done (this week)
-- [x] #40 Base tool schema validation
-- [x] #41 Session tree prototype
-```
+- **GitHub adapter** — sync to GitHub Issues/Projects. Agents participate in Discussions, author PRs.
+- **Linear adapter** — sync to Linear. SHQ's current PM tool.
+- **Jira adapter** — sync to Jira. Enterprise teams.
+
+Adapters are bidirectional: create a task in Linear → it appears in `backlog/`. Complete a task in `backlog/` → Linear updates. Conflict resolution: repo-local wins (same principle as file-based memory).
+
+### 7.4 Conventions
+
+- **Agents are first-class contributors** — they author PRs, comment on tasks, participate in discussions regardless of which PM tool is in use.
+- **Labels/tags** distinguish human-created vs agent-created tasks (`source:human`, `source:agent`).
+- **ADRs** (`docs/adr/`) are always repo-local, never synced to external tools (decisions live in git).
 
 #### Second-Order Effects
-- GitHub as the only interface means **all work is automatically versioned and searchable** — no lost Notion pages, no stale Trello boards.
-- Agents participating in GitHub means **their contributions are visible in the same stream as human work** — transparency by default.
-- No external tools means **onboarding is simpler** — clone the repo, you have everything.
+- Repo-local as source of truth means **the harness works without any external service** — clone the repo, you have everything.
+- PM adapters as plugins means **teams aren't locked into our tool choices** — use whatever PM tool you already have.
+- Abstracting PM the same way we abstract messaging creates **a consistent extension pattern** — adapters for everything.
 
 ---
 
