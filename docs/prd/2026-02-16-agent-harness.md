@@ -554,7 +554,18 @@ Reviewing agent work follows existing developer workflows. Code changes come as 
 
 Knowing when to interrupt versus when to stay quiet is one of the hardest UX problems. The harness provides graduated urgency levels: silent (log it, don't message), normal (message in the relevant channel, no notification), urgent (direct message with notification), and critical (multi-channel alert). The default is conservative — most things are normal or silent. Agents learn over time which topics their human considers urgent, and those preferences go into `MEMORY.md` as durable configuration.
 
-### 13.4 Configuration UX
+### 13.4 Error Communication
+
+When an agent fails a task, how it communicates that failure is a UX problem, not a technical one. Agents that fail silently or retry in loops are the worst experience. The harness enforces a failure communication protocol:
+
+1. **Explain what failed and why** — in plain language, not stack traces. "I couldn't deploy because the API token expired" not "Error: 401 Unauthorized at line 47."
+2. **Say what was tried** — "I attempted to refresh the token, then tried the backup endpoint." The human needs to know the agent didn't just give up immediately.
+3. **Suggest what the human can do** — "You can regenerate the token at Settings → API Keys, or I can try again with a different approach."
+4. **Don't retry silently on ambiguous failures** — if the failure might be a misunderstanding of the task (not just a transient error), the agent stops and asks rather than burning tokens in a loop. Transient failures (rate limits, network blips) get automatic retry with backoff. Semantic failures (wrong file, unclear instructions, permission denied) get escalated to the human.
+
+This is enforced at the harness level, not left to individual agent prompts. The tool execution layer wraps failures in a structured format that the agent must translate into human-readable communication before responding.
+
+### 13.5 Configuration UX
 
 The harness is CLI-first. `harness init` scaffolds a workspace, `harness agent create` sets up a new agent, `harness connect slack` wires up a messaging surface. Power users live in config files and the terminal. This is the primary interface and it needs to be excellent.
 
