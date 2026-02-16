@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.3
+**Status:** v1.4
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -66,7 +66,7 @@ Sessions are tree-structured, not flat history. Agents can branch (sub-tasks, re
 
 > **Research validation:** pi-agent-core's event streaming architecture (`agent_start` → `turn_start` → `message_update` → `tool_execution_*` → `turn_end`) provides the granular event model we need for session trees. Their `transformContext() → convertToLlm()` message pipeline cleanly separates app-level messages from LLM messages. We adopt these patterns.
 
-Tree-structured sessions create garbage collection needs — abandoned branches accumulate, so we need a branch pruning policy (TTL or explicit close). On the upside, session trees give us audit trails for free: every decision path is preserved, which feeds directly into our ADR process (§9). Worth noting: branches that produce useful output should trigger compound capture — the system prompts to generalize the solution.
+Tree-structured sessions create garbage collection needs — abandoned branches accumulate, so we need a branch pruning policy (TTL or explicit close). On the upside, session trees give us audit trails for free: every decision path is preserved, which feeds directly into our ADR process (§10). Worth noting: branches that produce useful output should trigger compound capture — the system prompts to generalize the solution.
 
 ### 4.2 Base Tools (5 primitives)
 
@@ -313,7 +313,59 @@ circuit_breaker:
 
 ---
 
-## 6. Multi-Agent Primitives (Phase 2 core)
+## 6. Security
+
+Guardrails (§5) define operational constraints — what agents are *allowed* to do. Security addresses a different question: what happens when someone actively tries to make agents do things they shouldn't? The threat model for an agent harness is broad and largely novel. Agents sit at the intersection of untrusted input, powerful tools, and persistent state — an attacker who compromises an agent's reasoning effectively gains access to everything the agent can touch.
+
+### 6.1 Threat Model
+
+**Prompt injection** is the defining security challenge for agent systems. Unlike traditional software where code and data are cleanly separated, agents process natural language where instructions and content are the same medium. Every piece of untrusted content an agent encounters — a fetched web page, a message from a stranger in a group chat, a webhook payload, an email body, even the contents of a file someone shared — is a potential vector for injecting instructions that hijack the agent's behavior. Indirect prompt injection is particularly insidious: an attacker plants instructions in a web page they control, knowing an agent will eventually fetch and process it. The agent dutifully follows the injected instructions, believing them to be part of its task.
+
+**Supply chain attacks on extensions** are the agent equivalent of malicious npm packages. A compromised SKILL.md, a malicious MCP server, or a tampered extension can execute arbitrary code with the agent's full permissions. The self-managing pattern we adopt from pi-mom — where agents install their own tools and configure their own credentials — amplifies this risk. An agent that fetches a skill URL (the nanobot pattern) and follows its setup instructions is executing an install script authored by an unknown party. Goose's approach of automatic malware scanning of external extensions before activation is a useful starting point, but scanning alone is insufficient for natural-language skill definitions that don't contain traditional malware signatures.
+
+**Credential and data exfiltration** is a natural consequence of prompt injection. Once an attacker controls agent behavior (even partially), the obvious next step is extracting secrets: API keys from environment variables, tokens from config files, private data from memory files, conversation history from other channels. The exfiltration path is any tool that can send data outward — a web fetch to an attacker-controlled URL, a message to an external channel, even encoding secrets in seemingly innocuous output that the attacker reads later.
+
+**Privilege escalation** occurs when an agent is tricked into using elevated tools it wouldn't normally invoke. A crafted message might convince an agent that a "routine task" requires shell access, or that an "urgent deployment" needs to bypass the approval gate. In multi-agent setups, there's an additional vector: agent impersonation, where one agent (or an attacker posing as an agent) issues instructions to another agent over the RPC layer (§7.1). Since agents treat other agents as collaborators, the trust boundary between agents needs cryptographic verification, not just convention.
+
+**Sandbox escape** is the last line of defense failing. If agents execute tools in Docker containers (as OpenHands demonstrates and pi-mom recommends), the container boundary is the security perimeter. Container escapes are well-studied but still occur — kernel exploits, mounted sockets, excessive capabilities. An agent that can manipulate its own container configuration, or that runs with elevated container privileges, has a wider escape surface.
+
+### 6.2 Defense-in-Depth
+
+No single defense stops a determined attacker. The harness layers multiple independent defenses so that any single failure doesn't cascade into full compromise.
+
+**Input sanitization and content marking.** All content from external sources enters the agent's context wrapped in explicit untrusted markers. OpenClaw's `EXTERNAL_UNTRUSTED_CONTENT` pattern — where fetched web pages, incoming messages from non-trusted users, webhook payloads, and file contents are demarcated with source attribution — is the baseline we adopt. The key insight is that marking alone doesn't prevent injection (the model might still follow injected instructions), but it makes the attack visible in audit logs, enables post-hoc analysis, and gives the model a fighting chance at distinguishing data from directives. Content from the agent's own workspace and from its primary human bypasses untrusted marking; everything else is untrusted by default.
+
+**Output filtering.** The harness scans agent output before delivery for patterns that look like credentials, API keys, connection strings, or private data. This is the same secret-scanning linter from §5.5, applied in real-time to outgoing messages and tool call parameters. If an agent is tricked into exfiltrating an API key via a web request, the output filter catches the key pattern in the URL and blocks the call. This is a probabilistic defense — novel encoding schemes can evade pattern matching — but it catches the low-hanging fruit that constitutes most real-world exfiltration attempts.
+
+**Sandboxing.** Tool execution happens inside containers with minimal privileges. The default sandbox profile drops all Linux capabilities except those explicitly needed, mounts the workspace read-write but nothing else, disables network access unless the tool requires it, and runs as a non-root user. OpenHands validates this pattern at scale — their entire agent-computer interface runs inside Docker containers, and it works. The harness should ship a default sandbox profile and let operators tighten it further. Agents cannot modify their own sandbox configuration; that's an operator-level setting.
+
+**Extension vetting.** Skills and MCP servers are the primary supply chain attack surface. The harness implements a three-tier trust model for extensions: *built-in* (shipped with the harness, fully trusted), *allowlisted* (reviewed and approved by the operator, hash-pinned), and *untrusted* (everything else, runs with reduced permissions and no access to secrets). Goose's malware scanning is adopted for the untrusted tier, but for allowlisted extensions, we go further: cryptographic signing of skill packages, hash verification on load, and a review process that mirrors code review. MCP servers from unknown sources run in their own sandboxed process with no access to the agent's memory or credentials — they can only communicate through the MCP protocol's defined message types.
+
+**Network egress controls.** Agents should not be able to POST data to arbitrary endpoints. The sandbox's network policy defaults to deny-all-outbound, with an allowlist of permitted destinations (API providers, git remotes, configured messaging surfaces). This is the single most effective defense against data exfiltration: even if an attacker fully controls the agent's reasoning, they can't send data anywhere that isn't pre-approved. The allowlist is operator-configured and auditable, not agent-modifiable.
+
+**Audit logging.** Every tool call, every external action, every permission escalation, and every approval gate decision is logged to an append-only audit trail. Agents cannot modify or delete their own audit logs (this is enforced by the logging subsystem writing to a location outside the agent's workspace, or by using append-only file attributes). The audit log captures: timestamp, tool name, full parameters, result summary, source of the instruction (which message triggered this action), and whether untrusted content was in the active context. This makes forensic analysis of security incidents tractable — "what did the agent do after processing that email?" is always answerable.
+
+**Principle of least privilege.** Agents start with the minimal permission set for their configured role. A research agent gets read-only tools and web search. A development agent gets workspace write access and shell. An operations agent gets deployment tools. Permissions are additive and explicit — an agent never has a capability it wasn't specifically granted. Elevation requests go through the same approval gates defined in §5.1, but with an additional check: if the elevation request originated from processing untrusted content, the gate flags this to the human approver. This doesn't prevent all privilege escalation, but it ensures that the human making the approval decision knows the request's provenance.
+
+### 6.3 Multi-Agent Security
+
+When agents communicate over the RPC layer (§7.1), every message carries a cryptographic signature tied to the sending agent's identity. Agents verify signatures before processing RPC messages. This prevents impersonation — a compromised agent or an external attacker cannot forge messages from another agent. The coordination layer (messaging surfaces) is inherently human-visible and thus self-auditing, but RPC is agent-to-agent and needs this cryptographic accountability.
+
+Cross-agent memory isolation (§5.5) is also a security boundary: even if Agent A is compromised, it cannot read Agent B's memory files or credentials. The blast radius of a single compromised agent is limited to that agent's workspace, permissions, and network allowlist.
+
+### 6.4 Security Posture Over Time
+
+Security is not a launch checklist — it's an ongoing posture. The harness should support:
+
+- **Periodic permission audits.** A maintenance agent (§7.3) reviews each agent's actual tool usage against its granted permissions and flags over-provisioned agents.
+- **Anomaly detection.** If an agent that normally makes 5 tool calls per session suddenly makes 50, or starts accessing files it's never touched before, the circuit breaker (§5.4) should trigger.
+- **Incident response playbook.** When a security event is detected (output filter catches a credential, audit log shows unexpected elevated access), the harness should have a documented response: halt the agent, preserve the audit log, alert the operator, and quarantine the workspace for analysis.
+
+The uncomfortable truth is that agent security is an unsolved problem industry-wide. Prompt injection has no complete defense today — only mitigations that raise the cost of attack. Our strategy is defense-in-depth: assume any single layer will be bypassed, and design so that the next layer catches it. The combination of input marking, output filtering, sandboxing, network egress controls, and comprehensive audit logging creates a security posture where attacks are detectable and containable, even when they can't be perfectly prevented.
+
+---
+
+## 7. Multi-Agent Primitives (Phase 2 core)
 
 ### 6.1 Agent-to-Agent Communication
 
@@ -327,7 +379,7 @@ Think: Slack is the standup, RPC is the API call.
 - **Handoff protocol** — typed task handoffs with context, constraints, and expected output format
 - **Shared artifacts via git** — code and specs through PRs, coordination through messaging
 
-Two communication channels means agents must decide which to use — the convention is simple: data goes over RPC, decisions go to the coordination layer. This means agents become accountable: their reasoning is auditable in Slack history, which feeds into decision logging (§9). Git-based shared artifacts mean agent work is reviewable through the same PR process as human work.
+Two communication channels means agents must decide which to use — the convention is simple: data goes over RPC, decisions go to the coordination layer. This means agents become accountable: their reasoning is auditable in Slack history, which feeds into decision logging (§10). Git-based shared artifacts mean agent work is reviewable through the same PR process as human work.
 
 ### 6.2 Governance Model
 
@@ -345,7 +397,7 @@ Two communication channels means agents must decide which to use — the convent
 
 ---
 
-## 7. Messaging Surface Abstraction
+## 8. Messaging Surface Abstraction
 
 Channel-agnostic messaging is our **core differentiator** — no existing framework provides this.
 
@@ -360,11 +412,11 @@ Channel abstraction means agents are platform-independent — migrate from Slack
 
 ---
 
-## 8. Collaboration Interface
+## 9. Collaboration Interface
 
 ### 8.1 Two Layers: Repo-Local + External Adapters
 
-The same principle that drives our messaging abstraction (§7) applies to project management: **don't hardcode GitHub, Linear, or Jira — abstract them.**
+The same principle that drives our messaging abstraction (§8) applies to project management: **don't hardcode GitHub, Linear, or Jira — abstract them.**
 
 | Layer | What | Examples |
 |---|---|---|
@@ -405,7 +457,7 @@ Repo-local as source of truth means the harness works without any external servi
 
 ---
 
-## 9. Decision Capture Protocol
+## 10. Decision Capture Protocol
 
 Decisions happen in conversations (Slack, GitHub Discussions, PRs). The record lives in the repo.
 
@@ -454,7 +506,7 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 10. Proactive Automation
+## 11. Proactive Automation
 
 - **Heartbeat system** — periodic check-ins, batched checks (email, calendar, mentions)
 - **Cron scheduler** — exact timing, isolated sessions, different models per task
@@ -462,7 +514,7 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 11. Deployment Model
+## 12. Deployment Model
 
 - **Per-agent daemon** — each agent runs as its own process (like OpenClaw today). Keeps isolation simple.
 - **Local-first** — runs on user's machine or a VPS. No mandatory cloud dependency.
@@ -472,7 +524,7 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 12. What We Deliberately Omit (v1)
+## 13. What We Deliberately Omit (v1)
 
 - **Dashboard/observability UI** — use logs and CLI for now; build when it hurts (but add OpenTelemetry hooks cheaply — Pydantic AI validates this pattern)
 - **Plugin marketplace** — skills are git repos; discovery is manual until scale demands more
@@ -482,7 +534,7 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 13. Success Criteria
+## 14. Success Criteria
 
 1. Single agent running on new core, talking on one surface (end of week 3)
 2. Two agents collaborating through new system (end of week 4)
@@ -494,7 +546,7 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 14. Critical Fork: Build vs. Wrap pi-agent-core
+## 15. Critical Fork: Build vs. Wrap pi-agent-core
 
 This is THE architectural decision. It must be resolved in Week 2.
 
@@ -562,7 +614,7 @@ From CrewAI, additionally adopt:
 
 ---
 
-## 15. Key Decisions & Open Questions
+## 16. Key Decisions & Open Questions
 
 ### Resolved (Kani + Rem aligned, pending human approval):
 - **Language/runtime:** TypeScript/Node.js — matches OpenClaw, zero ramp-up, strong ecosystem
@@ -587,7 +639,7 @@ Needs hands-on evaluation in Week 2. **Decision Status: PENDING.**
 
 ---
 
-## 16. Testing Strategy
+## 17. Testing Strategy
 
 Agent frameworks are notoriously hard to test. Our approach:
 
@@ -601,7 +653,7 @@ Tests are not Phase 2. The golden path E2E ships with the first prototype (Week 
 
 ---
 
-## 17. Timeline
+## 18. Timeline
 
 | Week | Milestone |
 |------|-----------|
