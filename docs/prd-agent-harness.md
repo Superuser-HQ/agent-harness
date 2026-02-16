@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** Draft v0.2
+**Status:** Draft v0.3
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -136,21 +136,29 @@ Channel-agnostic messaging is OpenClaw's killer feature. Preserve it.
 - **Cron scheduler** — exact timing, isolated sessions, different models per task
 - **Compound loop integration** — recurring agents that run Plan → Work → Review → Compound on maintenance tasks
 
-## 8. What We Deliberately Omit (v1)
+## 8. Deployment Model
+
+- **Per-agent daemon** — each agent runs as its own process (like OpenClaw today). Keeps isolation simple.
+- **Local-first** — runs on user's machine or a VPS. No mandatory cloud dependency.
+- **Agent discovery** — agents register with a lightweight coordinator (config file or local service) that maps agent IDs to endpoints. For v1, this can be a shared JSON file in the repo.
+- **Containerized deployment (optional)** — Docker Compose for multi-agent setups. Each agent = one container. Shared network for RPC, messaging surface for human-visible coordination.
+- **Single-machine multi-agent** — v1 target. Distributed multi-machine is Phase 3.
+
+## 9. What We Deliberately Omit (v1)
 
 - **Dashboard/observability UI** — use logs and CLI for now; build when it hurts
 - **Plugin marketplace** — skills are git repos; discovery is manual until scale demands more
 - **Visual agent builder** — no drag-and-drop; code-first
 - **Background parallel bash** — simplicity > parallelism for v1
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 1. Single agent running on new core, talking on one surface (end of week 3)
 2. Two agents collaborating through new system (end of week 4)
 3. Feature parity with OpenClaw features we actually use (end of week 6)
 4. All SHQ agent operations migrated off OpenClaw (end of week 8)
 
-## 10. Key Decisions & Open Questions
+## 11. Key Decisions & Open Questions
 
 ### Resolved (Kani + Rem aligned, pending human approval):
 - **Language/runtime:** TypeScript/Node.js — matches OpenClaw, zero ramp-up, strong ecosystem
@@ -164,7 +172,7 @@ Channel-agnostic messaging is OpenClaw's killer feature. Preserve it.
 - **Name?** Working title TBD. Short, memorable, not taken on npm.
 - **Messaging adapter architecture?** How do we abstract Slack/Telegram/Signal cleanly? Port OpenClaw's adapter pattern or design fresh?
 
-## 11. Timeline
+## 12. Timeline
 
 | Week | Milestone |
 |------|-----------|
@@ -182,5 +190,5 @@ Channel-agnostic messaging is OpenClaw's killer feature. Preserve it.
 
 - [OpenAI Harness Engineering](https://openai.com/index/harness-engineering/)
 - [Compound Engineering (Kieran Klaassen / Cora)](https://every.to/guides/compound-engineering)
-- [Pi-AI architecture analysis](https://github.com/pi-ai) (via Rem's digest)
+- [Pi-AI architecture (pi-mono)](https://github.com/badlogic/pi-mono) (via Rem's digest)
 - OpenClaw feature audit (to be completed Week 1)
