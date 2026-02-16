@@ -211,7 +211,7 @@ Network and external action gates deserve special attention. Any action that lea
 
 **Context isolation.** Sub-agents and branch sessions do not inherit elevated permissions from their parent. If the main session has system-wide shell access, a branch spawned for a research task starts with read-only unless explicitly granted more. This is the principle of least privilege applied to session trees. The downstream effect is that spawning a sub-agent is always safe — you can't accidentally create a more powerful child than intended.
 
-**Self-modification limits.** Agents can propose changes to their own SOUL.md, AGENTS.md, or config files, but they cannot self-approve those changes. Proposed modifications go through the standard PR/review process, or at minimum require human acknowledgment. This prevents drift where an agent gradually loosens its own constraints through incremental self-edits.
+**Self-modification limits.** Agents can propose changes to their own SOUL.md, AGENTS.md, or config files, but they cannot self-approve those changes. Proposed modifications always go through the standard PR/review process — a reviewable diff, not a thumbs-up in chat. This prevents drift where an agent gradually loosens its own constraints through incremental self-edits.
 
 ### 5.3 Human-in-the-Loop
 
@@ -238,6 +238,7 @@ Agents can burn through tokens and API calls fast, especially in compound loops 
 
 - **Token budget per session** — configurable ceiling. When hit, the agent checkpoints and stops rather than silently burning money.
 - **Token budget per task** — for sub-agents and branch sessions. A research task doesn't need the same budget as a full implementation task.
+- **Circuit breaker** — if >50% of a session's token budget is consumed in <5 minutes, the agent pauses and alerts the human. Budgets catch the ceiling, but circuit breakers catch the velocity — a $50 budget burned in a tight retry loop is still a problem.
 - **Rate limiting on external API calls** — per-provider, configurable. Prevents runaway loops from hammering APIs.
 - **Model tier restrictions** — configurable rules like "use haiku/flash for simple lookups, sonnet for standard work, opus only for complex reasoning." The agent can request a tier upgrade, but the default should be the cheapest model that gets the job done. This creates a tension with developer experience (agents work better with smarter models) that we resolve by making the tier easily overridable, not by defaulting to the most expensive option.
 
@@ -257,7 +258,7 @@ Different channels have different trust levels, and the agent's behavior should 
 - **Per-channel permission levels.** What the agent can do in `#general` (read-only, respond when mentioned) is different from what it can do in a DM with its human (full workspace access, proactive messaging). Channel configs define the permission ceiling.
 - **Mention-gated channels.** In busy channels, agents should only respond when explicitly mentioned. The harness enforces this — messages in mention-gated channels that don't include the agent's name are not forwarded to the agent at all, saving tokens and preventing unwanted interjections.
 - **Group chat behavior.** In group contexts, agents follow the principle of minimal intrusion: respond when asked, contribute when valuable, stay silent otherwise. The harness provides signals (mention detected, direct question, relevant topic) that help the agent decide, but the hard constraint is the mention gate.
-- **No cross-channel forwarding.** An agent cannot forward messages from one channel to another without explicit permission in its config. A message in a private DM stays in that DM. A message in `#engineering` doesn't get relayed to `#general`. This is a privacy boundary, not a convenience feature.
+- **No automatic cross-channel forwarding.** An agent cannot automatically forward messages between channels without explicit config. A message in a private DM stays in that DM unless the config says otherwise. Manual forwarding on human request is always allowed — if a human says "share this in #ai-collab," that's an explicit instruction, not a guardrail violation.
 
 ### 5.7 Guardrail Configuration
 
@@ -297,6 +298,17 @@ memory:
   cross_agent_access: deny
   pii_scan: true
   secret_scan: true
+
+approval_gates:
+  deploy: always          # always require human approval
+  send_email: always
+  financial_action: always
+  public_comms: always    # tweets, posts, public PRs
+  arch_decisions: always  # changes to ADRs, guardrails, soul
+
+circuit_breaker:
+  budget_velocity_pct: 50   # pause if >50% budget consumed...
+  budget_velocity_window_s: 300  # ...in under 5 minutes
 ```
 
 ---
