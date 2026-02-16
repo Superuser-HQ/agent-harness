@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.4
+**Status:** v1.5
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -526,9 +526,99 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 13. What We Deliberately Omit (v1)
+## 13. Human Interaction & Team UX
 
-- **Dashboard/observability UI** — use logs and CLI for now; build when it hurts (but add OpenTelemetry hooks cheaply — Pydantic AI validates this pattern)
+Building an agent harness is half the problem. The other half is making it feel natural for humans to work alongside agents every day. This section addresses the full experience — from the first five minutes with a new agent to the daily rhythms of a team where agents are genuine collaborators.
+
+### 13.1 Onboarding: The First Five Minutes
+
+A new team member's first interaction with the harness should feel like meeting a colleague, not configuring a server. The agent introduces itself — its name, what it's good at, what it won't do, how it prefers to communicate. This identity lives in `SOUL.md` (personality, tone, boundaries) and `AGENTS.md` (capabilities, workspace conventions), following the pattern OpenClaw established and pi-mom independently converged on with its per-channel workspace model. The agent reads these files at session start and behaves accordingly, which means onboarding a new human is as simple as pointing them to the right channel. The agent already knows who it is.
+
+Configuration during onboarding should be conversational where possible. "Hey, connect to my Slack workspace" beats editing a YAML file for most people. But the conversational setup generates the same config files that a power user would write by hand — there's one source of truth, and it's always a file in the repo. Goose's custom distributions pattern is instructive here: teams can create pre-configured agent profiles (a "research agent" distribution, a "dev agent" distribution) so new members pick a starting point rather than building from scratch.
+
+The first task the agent completes should be small, visible, and useful — summarize a channel's recent history, set up a daily standup reminder, or review a PR. This builds trust through demonstration, not documentation.
+
+### 13.2 Team Dynamics and Shared Agents
+
+The default model is one primary agent per human, with shared agents for team-wide functions (a team standup bot, a shared research agent, a maintenance agent that gardens docs). Primary agents know their human deeply — preferences, communication style, work patterns. Shared agents are more formal, more conservative, and more explicit about what they're doing and why.
+
+An agent behaves differently depending on context. In a 1:1 DM with its primary human, it's informal, proactive, and has full workspace access. In a group channel, it follows the minimal intrusion principle from §5.6 — respond when mentioned, contribute when valuable, stay silent otherwise. In a cross-team channel where it encounters unfamiliar humans, it defaults to read-only behavior until explicitly engaged. These aren't separate modes to configure; they emerge naturally from the channel policies already defined in `GUARDRAILS.yaml`.
+
+Handoff is a real problem. When a human goes on vacation, their agent doesn't go dark — it continues background work (heartbeats, monitoring, cron tasks) and can be temporarily reassigned to a covering team member. The covering human gets a context briefing: what the agent has been working on, what's pending, what decisions are waiting. This is why daily memory files and `MEMORY.md` exist — they're not just for the agent's benefit, they're the handoff document. A new team member who wants to understand what an agent has been doing reads its memory files, the same way they'd read a colleague's handover notes.
+
+### 13.3 Daily Workflow
+
+A typical day with the harness looks like this: the agent sends a morning summary (overnight activity, upcoming calendar events, pending items), the human reviews and prioritizes, the agent executes throughout the day with periodic check-ins, and an end-of-day summary captures what was accomplished. The heartbeat system (§11) and cron scheduler handle the timing; the messaging surface (§8) handles the delivery.
+
+Reviewing agent work follows existing developer workflows. Code changes come as PRs that humans review normally. Task completions update Backlog.md entries with a summary of what was done. Decisions that need approval are surfaced explicitly through the approval gates in §5.3 — the agent doesn't bury important decisions in a wall of text, it flags them clearly and waits.
+
+Knowing when to interrupt versus when to stay quiet is one of the hardest UX problems. The harness provides graduated urgency levels: silent (log it, don't message), normal (message in the relevant channel, no notification), urgent (direct message with notification), and critical (multi-channel alert). The default is conservative — most things are normal or silent. Agents learn over time which topics their human considers urgent, and those preferences go into `MEMORY.md` as durable configuration.
+
+### 13.4 Configuration UX
+
+The harness is CLI-first. `harness init` scaffolds a workspace, `harness agent create` sets up a new agent, `harness connect slack` wires up a messaging surface. Power users live in config files and the terminal. This is the primary interface and it needs to be excellent.
+
+But not everyone on a team is a CLI person. A lightweight web dashboard — read-heavy, showing agent status, recent activity, cost summaries, and config — is Phase 2. It reads the same config files the CLI writes; it's a view layer, not a separate system. The hard constraint is that config files remain the source of truth. The dashboard can display and edit them, but it never maintains separate state.
+
+For teams running multiple agents, shared configuration lives in the repo: base `GUARDRAILS.yaml` with per-agent overrides, shared `MEMORY_POLICY.md`, team-wide skill definitions. Git handles versioning and review. This is the same repo-native philosophy from §9 applied to agent configuration — if it's not in the repo, it doesn't exist.
+
+### 13.5 Accessibility and Reach
+
+Voice interaction is already partially solved — OpenClaw's TTS/STT capabilities mean agents can speak and listen, not just read and write. The harness should preserve this: voice notes in Telegram, spoken summaries, audio briefings. For some humans, talking to their agent while commuting is more natural than typing, and the messaging surfaces that support voice (Telegram, WhatsApp, Discord) are already in our adapter roadmap.
+
+Mobile-friendly surfaces are a given, not a feature. Telegram, WhatsApp, Signal, and Discord are already mobile-native. The harness doesn't need a mobile app — it needs messaging adapters that work well on small screens. This means concise responses, progressive disclosure (summary first, details on request), and respecting platform conventions for formatting and interaction.
+
+---
+
+## 14. Observability & Monitoring
+
+You can't manage what you can't see, and agent systems are particularly opaque. An agent that silently burns $200 on a retry loop, or one whose memory index has drifted out of sync, or one that's been down for three hours because a messaging adapter lost its connection — these are not hypothetical failures, they're Tuesday. Observability is how we catch them before they compound.
+
+### 14.1 What to Observe
+
+The basics are token usage and cost, tracked per session, per task, per agent, and per day. The budget system in §5.4 enforces ceilings, but observability tells you *where* the money is going. A research sub-agent that burns 80% of the daily budget on a single query is a pattern you need to see to fix.
+
+Beyond cost: tool call frequency and latency (is the shell tool hanging? is the web fetch timing out consistently?), error rates by type (provider rate limits, tool failures, guardrail violations), memory file growth and vector index health (is the FAISS index stale? has `MEMORY.md` blown past its size limit?), and agent activity patterns (when is it active, what's it doing, how fast is it responding?). For multi-agent setups, add coordination metrics: RPC handoff success rates, messaging latency between agents, message volume in shared channels.
+
+None of this requires a fancy dashboard on day one. It requires structured data that's queryable after the fact.
+
+### 14.2 Structured Logging
+
+Every significant action the harness takes gets a structured JSON log entry: every LLM call (model, tokens in/out, latency, cost), every tool invocation (tool name, parameters, result summary, duration), every message sent or received (channel, direction, length), every external action (API calls, git operations, file writes outside workspace). This is not optional and it's not debug logging you turn on when something breaks — it's the always-on foundation that everything else builds from.
+
+The audit trail from §5.3 is a subset of this: the append-only, tamper-resistant log of actions that can't be modified by the agent itself. Observability extends the audit trail with performance data (latency, cost) and health signals (error counts, retry patterns) that aren't security-critical but are operationally essential.
+
+Pydantic AI's tight integration with OpenTelemetry via Logfire validates the approach of instrumenting the agent loop at the framework level rather than bolting it on later. We adopt OpenTelemetry hooks in v1 — not the full distributed tracing stack, but the instrumentation points that make it trivial to connect later. Spans for LLM calls, spans for tool executions, span attributes for token counts and costs. The cost of adding these hooks early is near-zero; the cost of retrofitting them into a system that wasn't designed for them is significant.
+
+### 14.3 CLI Observability
+
+The primary interface for observability in v1 is the CLI:
+
+- `harness status` — which agents are running, which adapters are connected, uptime, current session info
+- `harness costs [--today|--week|--agent <name>]` — token usage and estimated cost, sliceable by time and agent
+- `harness activity [--agent <name>]` — recent tool calls, messages, and actions in reverse chronological order
+- `harness health` — checks agent process, messaging adapter connections, cron scheduler state, memory index freshness
+
+Cost alerts deserve special mention. A simple threshold — "notify the human if total spend across all agents exceeds $X in a 24-hour period" — catches runaway loops and unexpected usage spikes. The circuit breaker in §5.4 catches velocity (burning budget too fast); cost alerts catch volume (spending too much overall). Together they cover the two main failure modes.
+
+### 14.4 Audit Trail and Traceability
+
+Every action should be traceable back to the conversation that triggered it. When an agent modifies a file, the log entry includes the session ID and message ID that led to that action. When something goes wrong — a bad deployment, an incorrect email, a file overwritten — the operator can trace from the action back to the instruction, back to the context the agent was working with. This is the same audit trail from §5.3 and §6.2, surfaced here as an observability concern because it serves both security and operational needs.
+
+For compliance-sensitive environments, the structured logs are exportable: JSON lines that can be ingested by any log aggregation system, filtered by agent, time range, action type, or cost threshold. The harness doesn't need to build log aggregation — it needs to produce logs in a format that works with existing tools.
+
+### 14.5 Phased Rollout
+
+v1 ships with structured JSON logging, CLI status commands, and per-session cost tracking. This covers the "what just happened and how much did it cost" questions that dominate early operations.
+
+Phase 2 adds OpenTelemetry integration (connecting the hooks from v1 to actual collectors), a lightweight web dashboard for teams who want visual monitoring, and configurable alerting (cost thresholds, error rate spikes, agent downtime). Mastra's built-in observability layer and CrewAI's AMP dashboard both validate that teams eventually want visual monitoring — but both also demonstrate that it's a product in itself, not a weekend project. We defer the dashboard until the data model is proven through CLI usage.
+
+Phase 3 extends to cross-agent observability: how are agents interacting, where are the bottlenecks in multi-agent workflows, what's the team-wide cost profile? This only matters when we're running enough agents that individual monitoring doesn't scale. By then, the structured logging and OpenTelemetry foundations from earlier phases make this tractable rather than heroic.
+
+---
+
+## 15. What We Deliberately Omit (v1)
+
 - **Plugin marketplace** — skills are git repos; discovery is manual until scale demands more
 - **Visual agent builder** — no drag-and-drop; code-first
 - **Background parallel bash** — simplicity > parallelism for v1
@@ -536,7 +626,7 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 14. Success Criteria
+## 16. Success Criteria
 
 1. Single agent running on new core, talking on one surface (end of week 3)
 2. Two agents collaborating through new system (end of week 4)
@@ -548,7 +638,7 @@ Explicit triggers mean no false positives — decisions are captured intentional
 
 ---
 
-## 15. Critical Fork: Build vs. Wrap pi-agent-core
+## 17. Critical Fork: Build vs. Wrap pi-agent-core
 
 This is THE architectural decision. It must be resolved in Week 2.
 
@@ -616,7 +706,7 @@ From CrewAI, additionally adopt:
 
 ---
 
-## 16. Key Decisions & Open Questions
+## 18. Key Decisions & Open Questions
 
 ### Resolved (Kani + Rem aligned, pending human approval):
 - **Language/runtime:** TypeScript/Node.js — matches OpenClaw, zero ramp-up, strong ecosystem
@@ -641,7 +731,7 @@ Needs hands-on evaluation in Week 2. **Decision Status: PENDING.**
 
 ---
 
-## 17. Testing Strategy
+## 19. Testing Strategy
 
 Agent frameworks are notoriously hard to test. Our approach:
 
@@ -655,7 +745,7 @@ Tests are not Phase 2. The golden path E2E ships with the first prototype (Week 
 
 ---
 
-## 18. Timeline
+## 20. Timeline
 
 | Week | Milestone |
 |------|-----------|
