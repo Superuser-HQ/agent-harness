@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.2
+**Status:** v1.3
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -66,10 +66,7 @@ Sessions are tree-structured, not flat history. Agents can branch (sub-tasks, re
 
 > **Research validation:** pi-agent-core's event streaming architecture (`agent_start` → `turn_start` → `message_update` → `tool_execution_*` → `turn_end`) provides the granular event model we need for session trees. Their `transformContext() → convertToLlm()` message pipeline cleanly separates app-level messages from LLM messages. We adopt these patterns.
 
-#### Second-Order Effects
-- Tree-structured sessions create **garbage collection needs** — abandoned branches accumulate. We need a branch pruning policy (TTL or explicit close).
-- Session trees enable **audit trails** — every decision path is preserved, which feeds into our ADR process (§8).
-- Branches that produce useful output should trigger **compound capture** — the system prompts to generalize the solution.
+Tree-structured sessions create garbage collection needs — abandoned branches accumulate, so we need a branch pruning policy (TTL or explicit close). On the upside, session trees give us audit trails for free: every decision path is preserved, which feeds directly into our ADR process (§9). Worth noting: branches that produce useful output should trigger compound capture — the system prompts to generalize the solution.
 
 ### 4.2 Base Tools (5 primitives)
 
@@ -93,10 +90,10 @@ Memory is an **architectural layer**, not a tool (see §4.5). Tools interact wit
 - **Hot-reload** — agents can create, modify, and reload extensions at runtime
 - **Progressive disclosure** — small AGENTS.md (~100 lines) as table of contents, deeper docs in structured `docs/`
 - **Compound capture** — after every significant task, the system prompts to capture learnings as tagged, searchable solution docs in `docs/solutions/`
+
 > **Research insight:** nanobot's self-configuring skill URLs (agent reads a URL, follows instructions, configures itself) is an elegant zero-setup pattern worth adopting.
 
-#### Second-Order Effects
-- Self-managing tools (pi-mom pattern) means **agents can extend their own capabilities without human intervention**. This is powerful but needs guardrails — new tools should be PR'd, not silently deployed.
+One consequence of this choice: self-managing tools (the pi-mom pattern) mean agents can extend their own capabilities without human intervention. This is powerful but needs guardrails — new tools should be PR'd, not silently deployed. See §5 for the full guardrails architecture.
 
 #### Phase 2: MCP Compatibility
 - Skills should be exposable as MCP servers for interop with Goose, Mastra, and the broader ecosystem. This is deliberately Phase 2 — we don't need external agents consuming our skills on day one. Get the skill system working first, add MCP exposure when it's stable. (Goose's MCP-native extension architecture validates MCP as the right protocol.)
@@ -122,10 +119,7 @@ Three tiers, all file-based (git-friendly):
 
 > **Research insight:** Mastra has the most sophisticated memory system we found — working memory (structured, persistent), semantic recall (vector-based), and observational memory (background agents maintaining dense observation logs). CrewAI's unified Memory class adds composite scoring (semantic similarity × recency × importance) with tunable weights and self-organizing scope trees. We adopt Mastra's tiered architecture and CrewAI's scoring model, but keep files as ground truth with vectors as index.
 
-#### Second-Order Effects
-- File-based vectors mean **memory is portable** — clone the repo, rebuild the index, full memory on any machine.
-- Vector indexing over markdown means **search quality depends on file structure** — we need conventions for how memory files are formatted (frontmatter, headers, atomic facts).
-- Git-backed memory creates **merge conflicts when multiple agents write simultaneously** — need clear ownership per file/section, or use append-only patterns.
+File-based vectors mean memory is portable — clone the repo, rebuild the index, full memory on any machine. This also means search quality depends on file structure, so we need conventions for how memory files are formatted (frontmatter, headers, atomic facts). One tension to flag: git-backed memory creates merge conflicts when multiple agents write simultaneously. Clear ownership per file/section, or append-only patterns, are the mitigation.
 
 Memory is git-backed. Multiple agents read/write via shared repo with conventions (clear ownership per section, structured files).
 
@@ -160,10 +154,7 @@ Memory is not left to each agent's ad-hoc judgment. An explicit `MEMORY_POLICY.m
 - Daily files older than 90 days get summarized and archived.
 - Duplicate facts across files get deduplicated during weekly review.
 
-#### Second-Order Effects
-- Explicit memory policy means **new agents onboard faster** — they read the policy, not reverse-engineer conventions from examples.
-- Size limits force **curation over accumulation** — agents learn to distinguish signal from noise.
-- Archive rules create a **two-tier recall system** — hot memory (recent, in-context) and cold memory (archived, vector-searchable).
+Explicit memory policy means new agents onboard faster — they read the policy, not reverse-engineer conventions from examples. Size limits force curation over accumulation, which teaches agents to distinguish signal from noise. The archive rules create a natural two-tier recall system: hot memory (recent, in-context) and cold memory (archived, vector-searchable).
 
 ### 4.7 Mechanical Enforcement
 
@@ -191,9 +182,128 @@ Memory is not left to each agent's ad-hoc judgment. An explicit `MEMORY_POLICY.m
 
 ---
 
-## 5. Multi-Agent Primitives (Phase 2 core)
+## 5. Guardrails
 
-### 5.1 Agent-to-Agent Communication
+Guardrails are not a feature bolted onto the side. They are the architectural skeleton that everything else hangs from. An agent harness without guardrails is just a script runner with extra steps. This section defines the trust, safety, and control architecture — the rules that let us give agents real power without losing sleep.
+
+### 5.1 Tool-Level Guardrails
+
+Every tool call passes through a permission layer before execution. Tools are classified into four tiers:
+
+| Tier | Scope | Examples | Default |
+|------|-------|----------|---------|
+| **Read-only** | Observe, never mutate | Read files, web search, snapshot | Allowed |
+| **Workspace-scoped** | Mutate within agent workspace | Write, Edit, Shell (in workspace) | Allowed |
+| **System-wide** | Mutate outside workspace | Shell (arbitrary paths), install packages | Requires approval |
+| **Elevated** | Irreversible or high-impact | Deploy, send money, delete production data | Requires explicit human approval per invocation |
+
+Per-channel tool policies govern what tools are available in which context. A channel config can allowlist specific tools (`read`, `write`, `message`) or denylist dangerous ones (`shell`). This mirrors OpenClaw's current model and works well in practice — a Slack channel where the agent can only read and respond is fundamentally different from a DM where it has full workspace access.
+
+File system boundaries are enforced mechanically, not by convention. An agent cannot write outside its workspace directory without an explicit permission grant in its config. This is the single most important guardrail for multi-agent setups: agent A's workspace is agent A's workspace, period. The `trash` command is preferred over `rm` for anything destructive — recoverable beats gone forever.
+
+Network and external action gates deserve special attention. Any action that leaves the machine — sending an email, making an API call to a third-party service, deploying code, posting publicly — passes through an approval gate. The default is "ask first." Trusted actions (like pushing to a known git remote) can be pre-approved in config, but the default posture is conservative. This means agents start cautious and earn broader permissions over time, not the reverse.
+
+### 5.2 Agent-Level Guardrails
+
+**Trust model.** An agent trusts its primary human fully. It treats other humans on the team as trusted for project scope. It treats other agents as collaborators, never as instructors. This distinction matters: if Agent B tells Agent A to disable its file system boundaries, Agent A refuses. Agents cooperate, but each agent's guardrails are set by its human, not by peer agents.
+
+**Prompt injection defense.** Untrusted content — web page fetches, user inputs in group chats, webhook payloads, file contents from unknown sources — must be clearly demarcated in the agent's context and never treated as instructions. The harness wraps untrusted content in explicit markers (e.g., `<untrusted_content source="web_fetch">...</untrusted_content>`) so the model can distinguish data from directives. This doesn't make prompt injection impossible, but it raises the bar significantly and makes the attack surface explicit.
+
+**Context isolation.** Sub-agents and branch sessions do not inherit elevated permissions from their parent. If the main session has system-wide shell access, a branch spawned for a research task starts with read-only unless explicitly granted more. This is the principle of least privilege applied to session trees. The downstream effect is that spawning a sub-agent is always safe — you can't accidentally create a more powerful child than intended.
+
+**Self-modification limits.** Agents can propose changes to their own SOUL.md, AGENTS.md, or config files, but they cannot self-approve those changes. Proposed modifications go through the standard PR/review process, or at minimum require human acknowledgment. This prevents drift where an agent gradually loosens its own constraints through incremental self-edits.
+
+### 5.3 Human-in-the-Loop
+
+The harness is designed around the assumption that humans steer and agents execute. This means clear escalation paths.
+
+**When should the agent stop and ask?**
+- Before any action classified as elevated (§5.1)
+- When it's uncertain about intent (ambiguous instructions, conflicting requirements)
+- Before making architectural decisions that constrain future options
+- When the cost of being wrong exceeds the cost of asking
+- Before any public communication (tweets, emails to external parties, blog posts)
+- Before any financial action (purchases, transfers, subscription changes)
+- Before deploying code to production
+
+**Approval gates** are configurable per agent and per channel. A deployment gate might require explicit `/approve` from the human. A public communication gate might require the human to review the draft before sending. The gates are mechanical — not "the agent should probably ask" but "the system blocks execution until approval is received."
+
+**Kill switch.** The human can halt any agent immediately, from any channel. `harness stop <agent>` or a configured emoji reaction (e.g., 🛑) kills the current session and queues no follow-up work. The agent shuts down cleanly, preserving state for later inspection but taking no further action. This is non-negotiable.
+
+**Audit trail.** Every tool call is logged with timestamp, parameters, and result. Every external action (message sent, API called, file written outside workspace) gets an additional audit entry. The audit log is append-only, stored in the repo, and agents cannot modify their own audit history. This means any agent action is traceable after the fact — "what did Agent A do at 3pm?" is always answerable.
+
+### 5.4 Cost and Resource Guardrails
+
+Agents can burn through tokens and API calls fast, especially in compound loops or multi-agent setups. The harness enforces budgets at multiple levels:
+
+- **Token budget per session** — configurable ceiling. When hit, the agent checkpoints and stops rather than silently burning money.
+- **Token budget per task** — for sub-agents and branch sessions. A research task doesn't need the same budget as a full implementation task.
+- **Rate limiting on external API calls** — per-provider, configurable. Prevents runaway loops from hammering APIs.
+- **Model tier restrictions** — configurable rules like "use haiku/flash for simple lookups, sonnet for standard work, opus only for complex reasoning." The agent can request a tier upgrade, but the default should be the cheapest model that gets the job done. This creates a tension with developer experience (agents work better with smarter models) that we resolve by making the tier easily overridable, not by defaulting to the most expensive option.
+
+### 5.5 Memory Guardrails
+
+Memory is powerful and dangerous. The guardrails here complement the memory policy (§4.6) with hard enforcement:
+
+- **No secrets in memory files.** The linter (§4.7) scans memory files for patterns that look like API keys, tokens, passwords, and connection strings. Violations block commits. Secrets belong in environment variables or secret managers, never in markdown.
+- **PII handling.** When agents encounter personally identifiable information (names, emails, phone numbers, addresses) in the course of their work, they don't persist it to memory unless explicitly instructed. The default is to use PII in-session and discard it. When persistence is needed, PII is flagged in the file so it can be audited and purged.
+- **Cross-agent memory isolation.** Agent A cannot read Agent B's `MEMORY.md` or daily logs without explicit permission in both agents' configs. Shared memory spaces (like a team knowledge base) are opt-in, clearly delineated, and governed by the memory policy. This prevents accidental information leakage between agents with different trust levels or different humans.
+- **Memory policy enforcement.** The rules in `MEMORY_POLICY.md` (§4.6) are not suggestions — they're enforced by linters and pre-commit hooks. An agent that writes a 15KB MEMORY.md when the limit is 10KB gets a lint error, not a gentle reminder.
+
+### 5.6 Channel Guardrails
+
+Different channels have different trust levels, and the agent's behavior should reflect that.
+
+- **Per-channel permission levels.** What the agent can do in `#general` (read-only, respond when mentioned) is different from what it can do in a DM with its human (full workspace access, proactive messaging). Channel configs define the permission ceiling.
+- **Mention-gated channels.** In busy channels, agents should only respond when explicitly mentioned. The harness enforces this — messages in mention-gated channels that don't include the agent's name are not forwarded to the agent at all, saving tokens and preventing unwanted interjections.
+- **Group chat behavior.** In group contexts, agents follow the principle of minimal intrusion: respond when asked, contribute when valuable, stay silent otherwise. The harness provides signals (mention detected, direct question, relevant topic) that help the agent decide, but the hard constraint is the mention gate.
+- **No cross-channel forwarding.** An agent cannot forward messages from one channel to another without explicit permission in its config. A message in a private DM stays in that DM. A message in `#engineering` doesn't get relayed to `#general`. This is a privacy boundary, not a convenience feature.
+
+### 5.7 Guardrail Configuration
+
+All guardrails are configured in a single, auditable file per agent: `GUARDRAILS.yaml` (or equivalent in the agent's workspace). This file is version-controlled, reviewable, and diffable. Changes to guardrails go through the same PR process as code changes.
+
+The guardrails config supports inheritance: a base config defines org-wide defaults, agent-specific configs override where needed. This means you set sane defaults once and only customize per agent when there's a reason.
+
+```yaml
+# Example GUARDRAILS.yaml
+tool_tiers:
+  elevated:
+    - deploy
+    - send_email
+    - financial_action
+  system_wide:
+    - shell_arbitrary
+    - install_package
+  
+file_system:
+  workspace_only: true
+  allowed_external_paths: []
+
+budgets:
+  tokens_per_session: 500000
+  tokens_per_task: 100000
+  default_model_tier: standard  # haiku/flash
+
+channels:
+  "#general":
+    tools: [read, message]
+    mention_gated: true
+  "dm":
+    tools: [read, write, edit, shell, message]
+    mention_gated: false
+
+memory:
+  cross_agent_access: deny
+  pii_scan: true
+  secret_scan: true
+```
+
+---
+
+## 6. Multi-Agent Primitives (Phase 2 core)
+
+### 6.1 Agent-to-Agent Communication
 
 Two channels, by design:
 
@@ -205,19 +315,16 @@ Think: Slack is the standup, RPC is the API call.
 - **Handoff protocol** — typed task handoffs with context, constraints, and expected output format
 - **Shared artifacts via git** — code and specs through PRs, coordination through messaging
 
-#### Second-Order Effects
-- Two communication channels means **agents must decide which to use** — need clear conventions (data → RPC, decisions → coordination layer).
-- Human-visible coordination means **agents become accountable** — their reasoning is auditable in Slack history, which feeds into decision logging (§8).
-- Git-based shared artifacts means **agent work is reviewable** — PRs from agents get the same review process as PRs from humans.
+Two communication channels means agents must decide which to use — the convention is simple: data goes over RPC, decisions go to the coordination layer. This means agents become accountable: their reasoning is auditable in Slack history, which feeds into decision logging (§9). Git-based shared artifacts mean agent work is reviewable through the same PR process as human work.
 
-### 5.2 Governance Model
+### 6.2 Governance Model
 
 - **Humans:** direction, veto power, merge authority on architectural decisions
 - **Agents:** first-class contributors (draft RFCs, write code, review PRs), influence but not authority
 - **Trust model:** each agent trusts its primary human fully, trusts other team humans for project scope, treats other agents as collaborators (not instructors)
 - **RFC process:** any significant change gets a written proposal; agents can author, humans approve
 
-### 5.3 Specialized Agent Roles
+### 6.3 Specialized Agent Roles
 
 - Reviewer agents (security, performance, architecture, data integrity)
 - Research agents (repo analysis, framework docs, best practices)
@@ -226,7 +333,7 @@ Think: Slack is the standup, RPC is the API call.
 
 ---
 
-## 6. Messaging Surface Abstraction
+## 7. Messaging Surface Abstraction
 
 Channel-agnostic messaging is our **core differentiator** — no existing framework provides this.
 
@@ -237,18 +344,15 @@ Channel-agnostic messaging is our **core differentiator** — no existing framew
 
 > **Research insight:** nanobot's channel gateway pattern is the closest prior art — a central `nanobot gateway` process multiplexes across 9+ chat platforms (Telegram, Discord, WhatsApp, Slack, Email, QQ, Feishu, DingTalk, Mochat) via config-driven adapters. We study this architecture deeply but build in TypeScript with stronger typing and plugin isolation.
 
-#### Second-Order Effects
-- Channel abstraction means **agents are platform-independent** — migrate from Slack to Discord without touching agent logic.
-- Unified messaging means **cross-platform coordination is natural** — an agent can receive a task on Slack and report results on Telegram.
-- Platform-specific formatting rules create a **growing compatibility matrix** — need automated tests per platform to catch regressions.
+Channel abstraction means agents are platform-independent — migrate from Slack to Discord without touching agent logic. It also makes cross-platform coordination natural: an agent can receive a task on Slack and report results on Telegram. Worth noting: platform-specific formatting rules create a growing compatibility matrix that needs automated tests per platform to catch regressions.
 
 ---
 
-## 7. Collaboration Interface
+## 8. Collaboration Interface
 
-### 7.1 Two Layers: Repo-Local + External Adapters
+### 8.1 Two Layers: Repo-Local + External Adapters
 
-The same principle that drives our messaging abstraction (§6) applies to project management: **don't hardcode GitHub, Linear, or Jira — abstract them.**
+The same principle that drives our messaging abstraction (§7) applies to project management: **don't hardcode GitHub, Linear, or Jira — abstract them.**
 
 | Layer | What | Examples |
 |---|---|---|
@@ -257,7 +361,7 @@ The same principle that drives our messaging abstraction (§6) applies to projec
 
 The harness depends on the repo-local layer only. PM adapters are optional plugins that sync outward.
 
-### 7.2 Repo-Local Task Management (Backlog.md)
+### 8.2 Repo-Local Task Management (Backlog.md)
 
 [Backlog.md](https://github.com/MrLesk/Backlog.md) is the agent-native task layer:
 
@@ -269,7 +373,7 @@ The harness depends on the repo-local layer only. PM adapters are optional plugi
 
 This is the source of truth for day-to-day agent work. Always available, even offline.
 
-### 7.3 PM Adapters (Phase 2)
+### 8.3 PM Adapters (Phase 2)
 
 Optional adapters sync Backlog.md tasks to external project management tools:
 
@@ -279,24 +383,21 @@ Optional adapters sync Backlog.md tasks to external project management tools:
 
 v1 adapters are **one-way (repo → external)**: task changes in `backlog/` push to the PM tool. Bidirectional sync (external → repo) is Phase 3 — it introduces conflict resolution complexity that isn't worth solving before the core is stable.
 
-### 7.4 Conventions
+### 8.4 Conventions
 
 - **Agents are first-class contributors** — they author PRs, comment on tasks, participate in discussions regardless of which PM tool is in use.
 - **Labels/tags** distinguish human-created vs agent-created tasks (`source:human`, `source:agent`).
 - **ADRs** (`docs/adr/`) are always repo-local, never synced to external tools (decisions live in git).
 
-#### Second-Order Effects
-- Repo-local as source of truth means **the harness works without any external service** — clone the repo, you have everything.
-- PM adapters as plugins means **teams aren't locked into our tool choices** — use whatever PM tool you already have.
-- Abstracting PM the same way we abstract messaging creates **a consistent extension pattern** — adapters for everything.
+Repo-local as source of truth means the harness works without any external service — clone the repo, you have everything. PM adapters as plugins means teams aren't locked into our tool choices. This creates a consistent extension pattern that mirrors the messaging abstraction: adapters for everything.
 
 ---
 
-## 8. Decision Capture Protocol
+## 9. Decision Capture Protocol
 
 Decisions happen in conversations (Slack, GitHub Discussions, PRs). The record lives in the repo.
 
-### 8.1 Architecture Decision Records (ADRs)
+### 9.1 Architecture Decision Records (ADRs)
 
 Location: `docs/adr/NNNN-title.md`
 
@@ -320,7 +421,7 @@ Location: `docs/adr/NNNN-title.md`
 [What else we looked at and why we didn't pick it]
 ```
 
-### 8.2 Explicit Capture Trigger
+### 9.2 Explicit Capture Trigger
 
 Decisions are captured via **explicit trigger**, not magic detection:
 
@@ -329,7 +430,7 @@ Decisions are captured via **explicit trigger**, not magic detection:
 - **CLI:** `harness decision "We chose X because Y"` — creates ADR directly.
 - **Agent-initiated:** When an agent recognizes it's making a significant choice, it drafts an ADR and requests human approval before merging.
 
-### 8.3 What Qualifies as a Decision
+### 9.3 What Qualifies as a Decision
 
 Not everything is an ADR. Capture when:
 - An architectural or design choice is made that constrains future options
@@ -337,14 +438,11 @@ Not everything is an ADR. Capture when:
 - A convention or policy is established
 - A significant tradeoff is accepted
 
-#### Second-Order Effects
-- Explicit triggers mean **no false positives** — decisions are captured intentionally, not guessed at.
-- Git-based ADRs mean **decisions are reviewable, revertible, and linkable** — "why did we do X?" is always answerable.
-- Agent-drafted ADRs mean **the capture cost is near-zero** — react with an emoji, get a PR.
+Explicit triggers mean no false positives — decisions are captured intentionally, not guessed at. Git-based ADRs mean decisions are reviewable, revertible, and linkable, so "why did we do X?" is always answerable. And because agents draft the ADRs, the capture cost is near-zero: react with an emoji, get a PR.
 
 ---
 
-## 9. Proactive Automation
+## 10. Proactive Automation
 
 - **Heartbeat system** — periodic check-ins, batched checks (email, calendar, mentions)
 - **Cron scheduler** — exact timing, isolated sessions, different models per task
@@ -352,7 +450,7 @@ Not everything is an ADR. Capture when:
 
 ---
 
-## 10. Deployment Model
+## 11. Deployment Model
 
 - **Per-agent daemon** — each agent runs as its own process (like OpenClaw today). Keeps isolation simple.
 - **Local-first** — runs on user's machine or a VPS. No mandatory cloud dependency.
@@ -362,7 +460,7 @@ Not everything is an ADR. Capture when:
 
 ---
 
-## 11. What We Deliberately Omit (v1)
+## 12. What We Deliberately Omit (v1)
 
 - **Dashboard/observability UI** — use logs and CLI for now; build when it hurts (but add OpenTelemetry hooks cheaply — Pydantic AI validates this pattern)
 - **Plugin marketplace** — skills are git repos; discovery is manual until scale demands more
@@ -372,7 +470,7 @@ Not everything is an ADR. Capture when:
 
 ---
 
-## 12. Success Criteria
+## 13. Success Criteria
 
 1. Single agent running on new core, talking on one surface (end of week 3)
 2. Two agents collaborating through new system (end of week 4)
@@ -384,7 +482,7 @@ Not everything is an ADR. Capture when:
 
 ---
 
-## 13. Critical Fork: Build vs. Wrap pi-agent-core
+## 14. Critical Fork: Build vs. Wrap pi-agent-core
 
 This is THE architectural decision. It must be resolved in Week 2.
 
@@ -452,7 +550,7 @@ From CrewAI, additionally adopt:
 
 ---
 
-## 14. Key Decisions & Open Questions
+## 15. Key Decisions & Open Questions
 
 ### Resolved (Kani + Rem aligned, pending human approval):
 - **Language/runtime:** TypeScript/Node.js — matches OpenClaw, zero ramp-up, strong ecosystem
@@ -477,7 +575,7 @@ Needs hands-on evaluation in Week 2. **Decision Status: PENDING.**
 
 ---
 
-## 15. Testing Strategy
+## 16. Testing Strategy
 
 Agent frameworks are notoriously hard to test. Our approach:
 
@@ -491,7 +589,7 @@ Tests are not Phase 2. The golden path E2E ships with the first prototype (Week 
 
 ---
 
-## 16. Timeline
+## 17. Timeline
 
 | Week | Milestone |
 |------|-----------|
