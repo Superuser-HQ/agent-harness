@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.0
+**Status:** v1.1
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -93,13 +93,13 @@ Memory is an **architectural layer**, not a tool (see §4.5). Tools interact wit
 - **Hot-reload** — agents can create, modify, and reload extensions at runtime
 - **Progressive disclosure** — small AGENTS.md (~100 lines) as table of contents, deeper docs in structured `docs/`
 - **Compound capture** — after every significant task, the system prompts to capture learnings as tagged, searchable solution docs in `docs/solutions/`
-- **MCP compatibility** — skills should be exposable as MCP servers for interop with Goose, Mastra, and the broader ecosystem
-
-> **Research insight:** Goose's MCP-native extension architecture validates MCP as the right protocol. nanobot's self-configuring skill URLs (agent reads a URL, follows instructions, configures itself) is an elegant zero-setup pattern worth adopting.
+> **Research insight:** nanobot's self-configuring skill URLs (agent reads a URL, follows instructions, configures itself) is an elegant zero-setup pattern worth adopting.
 
 #### Second-Order Effects
 - Self-managing tools (pi-mom pattern) means **agents can extend their own capabilities without human intervention**. This is powerful but needs guardrails — new tools should be PR'd, not silently deployed.
-- MCP compatibility means **our skills become usable by any MCP-compatible agent**, creating network effects beyond our ecosystem.
+
+#### Phase 2: MCP Compatibility
+- Skills should be exposable as MCP servers for interop with Goose, Mastra, and the broader ecosystem. This is deliberately Phase 2 — we don't need external agents consuming our skills on day one. Get the skill system working first, add MCP exposure when it's stable. (Goose's MCP-native extension architecture validates MCP as the right protocol.)
 
 ### 4.4 LLM Abstraction Layer
 
@@ -261,7 +261,7 @@ GitHub is the collaboration surface for both humans and agents. No Notion, no ex
 ### 7.2 Conventions
 
 - **Agents are first-class GitHub citizens** — they have GitHub accounts, author PRs, comment on issues, participate in discussions.
-- **`backlog.md`** at repo root tracks near-term work (replaces external task trackers). Agents update it as part of task completion.
+- **`backlog.md`** at repo root tracks near-term work (replaces external task trackers). **Ownership rule:** the agent _assigned_ to a task updates its status. Unassigned items are updated by whoever picks them up. This prevents merge conflicts from multiple agents editing simultaneously.
 - **Labels** distinguish human-created vs agent-created issues (`source:human`, `source:agent`).
 - **Templates** for issues and PRs enforce structure (required fields, checklists).
 
@@ -416,7 +416,7 @@ This is THE architectural decision. It must be resolved in Week 2.
 - Clean dependency tree
 
 **What it costs:**
-- 2-3 weeks additional development for agent loop, event system, context management
+- 4-5 weeks additional development for agent loop, event system, context management, session trees, multi-provider abstraction, and error handling (corrected from initial 2-3 week estimate — that was optimistic)
 - Risk of re-inventing solved problems
 - Smaller community (just us) vs. pi-mono's existing users
 
@@ -426,7 +426,7 @@ This is THE architectural decision. It must be resolved in Week 2.
 |---|---|---|
 | Time to first agent | ~1 week | ~3 weeks |
 | Time to messaging-first | ~3 weeks (fighting abstractions) | ~3 weeks (building right) |
-| Time to multi-agent | ~5 weeks (bolting on) | ~4 weeks (native) |
+| Time to multi-agent | ~5 weeks (bolting on) | ~5 weeks (native, but done right) |
 | Long-term maintenance | Upstream dependency risk | Full ownership |
 | Architecture fit | 70% match | 100% match |
 
@@ -462,15 +462,36 @@ From CrewAI, additionally adopt:
 - **Decision records:** Git-based ADRs with explicit capture triggers
 - **Memory store:** File-based with FAISS/USearch vector index. Files are truth, vectors are cache.
 
+### Critical Fork #2: Mastra as Dependency
+This is on par with the pi-agent-core decision. Mastra is the strongest architectural match (TypeScript, memory, MCP, workflows). Three options:
+- **A) Depend on Mastra** — use as library for agent primitives, memory, and workflows. Fast start, upstream dependency risk.
+- **B) Fork patterns** — study Mastra's architecture, reimplement in our core. Slower, full ownership.
+- **C) Complement** — use Mastra for what it does well (memory, workflows), build our own for what it doesn't (messaging, session trees). Mix-and-match.
+
+Needs hands-on evaluation in Week 2. **Decision Status: PENDING.**
+
 ### Open:
 - **Name?** Working title TBD. Short, memorable, not taken on npm.
 - **Messaging adapter architecture?** Study nanobot's gateway pattern, then design. Port OpenClaw's adapter pattern or design fresh?
-- **Mastra as dependency?** Strongest architectural match (TS, memory, MCP, workflows). Use as dependency for agent primitives, or just steal patterns? Needs hands-on evaluation.
 - **Vector store choice?** FAISS (mature, C++ with Node bindings) vs USearch (newer, potentially faster, better Node support). Benchmark needed.
 
 ---
 
-## 15. Timeline
+## 15. Testing Strategy
+
+Agent frameworks are notoriously hard to test. Our approach:
+
+1. **Unit tests** — tool implementations, message formatting, memory read/write, vector index operations. Standard Jest/Vitest.
+2. **Integration tests** — messaging adapters (mock Slack/Telegram APIs), LLM abstraction (mock provider responses), session lifecycle (create → branch → merge → prune).
+3. **Golden path E2E** — send message → agent processes → tools execute → response delivered → memory updated. One test per messaging surface. Run on every PR.
+4. **Replay tests** — record real agent sessions, replay against new code to catch regressions in behavior (not just API contracts).
+5. **Memory integrity** — vector index matches file content after writes, concurrent agent writes don't corrupt state.
+
+Tests are not Phase 2. The golden path E2E ships with the first prototype (Week 3).
+
+---
+
+## 16. Timeline
 
 | Week | Milestone |
 |------|-----------|
