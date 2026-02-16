@@ -277,7 +277,7 @@ Optional adapters sync Backlog.md tasks to external project management tools:
 - **Linear adapter** — sync to Linear. SHQ's current PM tool.
 - **Jira adapter** — sync to Jira. Enterprise teams.
 
-Adapters are bidirectional: create a task in Linear → it appears in `backlog/`. Complete a task in `backlog/` → Linear updates. Conflict resolution: repo-local wins (same principle as file-based memory).
+v1 adapters are **one-way (repo → external)**: task changes in `backlog/` push to the PM tool. Bidirectional sync (external → repo) is Phase 3 — it introduces conflict resolution complexity that isn't worth solving before the core is stable.
 
 ### 7.4 Conventions
 
