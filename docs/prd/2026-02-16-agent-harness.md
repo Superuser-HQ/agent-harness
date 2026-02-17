@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.7
+**Status:** v1.8
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -136,36 +136,40 @@ Multiple agents share the memory graph with scoped access (per-agent, per-team, 
 
 ### 4.6 Memory Policy (`MEMORY_POLICY.md`)
 
-Memory is not left to each agent's ad-hoc judgment. An explicit `MEMORY_POLICY.md` in every agent workspace defines:
+Memory is not left to each agent's ad-hoc judgment. An explicit `MEMORY_POLICY.md` in every agent workspace defines rules for the structured memory DB.
 
-**What to remember:**
-- Decisions and their rationale
-- User preferences and corrections
-- Lessons learned from failures
-- Project context that changes rarely but matters always
+**What to remember (stored as typed memories in DB):**
+- Decisions and their rationale (type: Decision)
+- User preferences and corrections (type: Preference)
+- Lessons learned from failures (type: Observation)
+- Project context that changes rarely but matters always (type: Fact)
+- Active goals and todos (types: Goal, Todo)
 
 **What NOT to remember:**
 - Secrets, credentials, tokens (use env vars or secret managers)
 - Transient state (build output, temp files)
-- Verbatim conversation logs beyond daily summaries
+- Verbatim conversation logs (session history handles this)
 - Other people's private information encountered in shared channels
 
 **When to remember:**
-- End of every significant task → update daily memory
-- Weekly → review daily logs, distill into MEMORY.md
+- End of every significant task → agent-initiated memory creation
+- Compaction events → compactor-initiated extraction of key facts
+- Cortex maintenance cycles → consolidation, dedup, decay
 - On explicit trigger → human says "remember this" or reacts with 📌
 
-**How to remember:**
-- Atomic facts, not narratives (one fact per line, greppable)
-- YAML frontmatter on solution docs (`tags`, `date`, `problem`, `solution`)
-- Vector index rebuilt on git push (CI hook or file watcher)
+**Canonical export rules:**
+- Decision, Identity, and long-lived Fact memories export to repo on every checkpoint
+- Export format: structured markdown/JSON with frontmatter (`type`, `tags`, `date`, `importance`)
+- Export freshness enforced in CI — stale exports block merges
+- Import/export determinism tested: same DB state → same export artifacts
 
 **Hygiene rules:**
-- Memory files have a max size (e.g., MEMORY.md < 10KB). When exceeded, archive older entries.
-- Daily files older than 90 days get summarized and archived.
-- Duplicate facts across files get deduplicated during weekly review.
+- Importance scoring governs decay — low-access, low-centrality memories decay over time
+- Identity memories exempt from decay
+- Near-duplicate memories merged by Cortex during maintenance cycles
+- Schema migrations versioned and tested
 
-Explicit memory policy means new agents onboard faster — they read the policy, not reverse-engineer conventions from examples. Size limits force curation over accumulation, which teaches agents to distinguish signal from noise. The archive rules create a natural two-tier recall system: hot memory (recent, in-context) and cold memory (archived, vector-searchable).
+Explicit memory policy means new agents onboard faster — they read the policy, not reverse-engineer conventions from examples. DB-backed memory with canonical exports gives us the best of both worlds: fast structured recall at runtime, reviewable artifacts in git.
 
 ### 4.7 Mechanical Enforcement
 
@@ -180,6 +184,7 @@ Explicit memory policy means new agents onboard faster — they read the policy,
 3. No tool can write outside workspace without explicit permission
 4. MEMORY_POLICY.md must exist in every agent workspace
 5. ADRs must have status, date, and decision fields
+6. Canonical memory exports must pass schema conformance and determinism tests
 
 ### 4.8 Process Model: Channel / Branch / Worker / Cortex
 
@@ -275,10 +280,10 @@ Agents can burn through tokens and API calls fast, especially in compound loops 
 
 Memory is powerful and dangerous. The guardrails here complement the memory policy (§4.6) with hard enforcement:
 
-- **No secrets in memory files.** The linter (§4.7) scans memory files for patterns that look like API keys, tokens, passwords, and connection strings. Violations block commits. Secrets belong in environment variables or secret managers, never in markdown.
-- **PII handling.** When agents encounter personally identifiable information (names, emails, phone numbers, addresses) in the course of their work, they don't persist it to memory unless explicitly instructed. The default is to use PII in-session and discard it. When persistence is needed, PII is flagged in the file so it can be audited and purged.
-- **Cross-agent memory isolation.** Agent A cannot read Agent B's `MEMORY.md` or daily logs without explicit permission in both agents' configs. Shared memory spaces (like a team knowledge base) are opt-in, clearly delineated, and governed by the memory policy. This prevents accidental information leakage between agents with different trust levels or different humans.
-- **Memory policy enforcement.** The rules in `MEMORY_POLICY.md` (§4.6) are not suggestions — they're enforced by linters and pre-commit hooks. An agent that writes a 15KB MEMORY.md when the limit is 10KB gets a lint error, not a gentle reminder.
+- **No secrets in memory DB or exports.** The linter scans canonical exports for patterns that look like API keys, tokens, passwords, and connection strings. Violations block commits. The DB layer also rejects memory creation attempts that match secret patterns. Secrets belong in environment variables or secret managers, never in memory.
+- **PII handling.** When agents encounter personally identifiable information (names, emails, phone numbers, addresses) in the course of their work, they don't persist it to memory unless explicitly instructed. The default is to use PII in-session and discard it. When persistence is needed, PII is flagged in the memory record so it can be audited and purged.
+- **Cross-agent memory isolation.** Agent A cannot query Agent B's memory scope without explicit permission in both agents' configs. Shared memory spaces (like a team knowledge base) are opt-in, clearly delineated, and governed by the memory policy. This prevents accidental information leakage between agents with different trust levels or different humans.
+- **Memory policy enforcement.** The rules in `MEMORY_POLICY.md` (§4.6) are not suggestions — they're enforced by the DB layer, linters on canonical exports, and CI gates. Schema conformance and export freshness are mechanically verified.
 
 ### 5.6 Channel Guardrails
 
@@ -352,7 +357,7 @@ Guardrails (§5) define operational constraints — what agents are *allowed* to
 
 **Supply chain attacks on extensions** are the agent equivalent of malicious npm packages. A compromised SKILL.md, a malicious MCP server, or a tampered extension can execute arbitrary code with the agent's full permissions. The self-managing pattern we adopt from pi-mom — where agents install their own tools and configure their own credentials — amplifies this risk. An agent that fetches a skill URL (the nanobot pattern) and follows its setup instructions is executing an install script authored by an unknown party. Goose's approach of automatic malware scanning of external extensions before activation is a useful starting point, but scanning alone is insufficient for natural-language skill definitions that don't contain traditional malware signatures.
 
-**Credential and data exfiltration** is a natural consequence of prompt injection. Once an attacker controls agent behavior (even partially), the obvious next step is extracting secrets: API keys from environment variables, tokens from config files, private data from memory files, conversation history from other channels. The exfiltration path is any tool that can send data outward — a web fetch to an attacker-controlled URL, a message to an external channel, even encoding secrets in seemingly innocuous output that the attacker reads later.
+**Credential and data exfiltration** is a natural consequence of prompt injection. Once an attacker controls agent behavior (even partially), the obvious next step is extracting secrets: API keys from environment variables, tokens from config files, private data from the memory DB, conversation history from other channels. The exfiltration path is any tool that can send data outward — a web fetch to an attacker-controlled URL, a message to an external channel, even encoding secrets in seemingly innocuous output that the attacker reads later.
 
 **Privilege escalation** occurs when an agent is tricked into using elevated tools it wouldn't normally invoke. A crafted message might convince an agent that a "routine task" requires shell access, or that an "urgent deployment" needs to bypass the approval gate. In multi-agent setups, there's an additional vector: agent impersonation, where one agent (or an attacker posing as an agent) issues instructions to another agent over the RPC layer (§7.1). Since agents treat other agents as collaborators, the trust boundary between agents needs cryptographic verification, not just convention.
 
@@ -382,7 +387,7 @@ No single defense stops a determined attacker. The harness layers multiple indep
 
 When agents communicate over the RPC layer (§7.1), every message carries a cryptographic signature tied to the sending agent's identity. Agents verify signatures before processing RPC messages. This prevents impersonation — a compromised agent or an external attacker cannot forge messages from another agent. The coordination layer (messaging surfaces) is inherently human-visible and thus self-auditing, but RPC is agent-to-agent and needs this cryptographic accountability.
 
-Cross-agent memory isolation (§5.5) is also a security boundary: even if Agent A is compromised, it cannot read Agent B's memory files or credentials. The blast radius of a single compromised agent is limited to that agent's workspace, permissions, and network allowlist.
+Cross-agent memory isolation (§5.5) is also a security boundary: even if Agent A is compromised, it cannot query Agent B's memory scope or credentials. The blast radius of a single compromised agent is limited to that agent's workspace, permissions, and network allowlist.
 
 ### 6.4 Security Posture Over Time
 
@@ -398,7 +403,7 @@ The uncomfortable truth is that agent security is an unsolved problem industry-w
 
 ## 7. Multi-Agent Primitives (Phase 2 core)
 
-### 6.1 Agent-to-Agent Communication
+### 7.1 Agent-to-Agent Communication
 
 Two channels, by design:
 
@@ -412,14 +417,14 @@ Think: Slack is the standup, RPC is the API call.
 
 Two communication channels means agents must decide which to use — the convention is simple: data goes over RPC, decisions go to the coordination layer. This means agents become accountable: their reasoning is auditable in Slack history, which feeds into decision logging (§10). Git-based shared artifacts mean agent work is reviewable through the same PR process as human work.
 
-### 6.2 Governance Model
+### 7.2 Governance Model
 
 - **Humans:** direction, veto power, merge authority on architectural decisions
 - **Agents:** first-class contributors (draft RFCs, write code, review PRs), influence but not authority
 - **Trust model:** each agent trusts its primary human fully, trusts other team humans for project scope, treats other agents as collaborators (not instructors)
 - **RFC process:** any significant change gets a written proposal; agents can author, humans approve
 
-### 6.3 Specialized Agent Roles
+### 7.3 Specialized Agent Roles
 
 - Reviewer agents (security, performance, architecture, data integrity)
 - Research agents (repo analysis, framework docs, best practices)
@@ -445,7 +450,7 @@ Channel abstraction means agents are platform-independent — migrate from Slack
 
 ## 9. Collaboration Interface
 
-### 8.1 Two Layers: Repo-Local + External Adapters
+### 9.1 Two Layers: Repo-Local + External Adapters
 
 The same principle that drives our messaging abstraction (§8) applies to project management: **don't hardcode GitHub, Linear, or Jira — abstract them.**
 
@@ -456,7 +461,7 @@ The same principle that drives our messaging abstraction (§8) applies to projec
 
 The harness depends on the repo-local layer only. PM adapters are optional plugins that sync outward.
 
-### 8.2 Repo-Local Task Management (Backlog.md)
+### 9.2 Repo-Local Task Management (Backlog.md)
 
 [Backlog.md](https://github.com/MrLesk/Backlog.md) is the agent-native task layer:
 
@@ -468,7 +473,7 @@ The harness depends on the repo-local layer only. PM adapters are optional plugi
 
 This is the source of truth for day-to-day agent work. Always available, even offline.
 
-### 8.3 PM Adapters (Phase 2)
+### 9.3 PM Adapters (Phase 2)
 
 Optional adapters sync Backlog.md tasks to external project management tools:
 
@@ -478,7 +483,7 @@ Optional adapters sync Backlog.md tasks to external project management tools:
 
 v1 adapters are **one-way (repo → external)**: task changes in `backlog/` push to the PM tool. Bidirectional sync (external → repo) is Phase 3 — it introduces conflict resolution complexity that isn't worth solving before the core is stable.
 
-### 8.4 Conventions
+### 9.4 Conventions
 
 - **Agents are first-class contributors** — they author PRs, comment on tasks, participate in discussions regardless of which PM tool is in use.
 - **Labels/tags** distinguish human-created vs agent-created tasks (`source:human`, `source:agent`).
@@ -492,31 +497,35 @@ Repo-local as source of truth means the harness works without any external servi
 
 Decisions happen in conversations (Slack, GitHub Discussions, PRs). The record lives in the repo.
 
-### 9.1 Architecture Decision Records (ADRs)
+### 10.1 Architecture Decision Records (ADRs)
 
 Location: `docs/adr/NNNN-title.md`
 
 ```markdown
-# ADR-0001: TypeScript as primary language
+# ADR-0001: Rust as primary language
 
 **Status:** Accepted
-**Date:** 2026-02-16
+**Date:** 2026-02-17
 **Deciders:** Yao, Kani, Rem
 
 ## Context
-[What prompted this decision]
+We need a runtime language for the agent harness. Key requirements: single-binary deployment, high concurrency for the Channel/Branch/Worker/Cortex process model, and zero runtime dependencies. Spacebot validates Rust in the same domain.
 
 ## Decision
-[What we decided]
+Rust. Single binary, zero deps, strong type system, native async for concurrent process model.
 
 ## Consequences
-[What happens as a result — good and bad]
+- Slower iteration speed vs TypeScript/Python — mitigated by constraining scope and reusing crates
+- Team needs Rust proficiency — hiring/ramp-up consideration
+- Excellent performance and reliability characteristics
+- No Node.js ecosystem dependency
 
 ## Alternatives Considered
-[What else we looked at and why we didn't pick it]
+- TypeScript/Node.js — faster iteration, larger ecosystem, but runtime dependency and weaker concurrency model
+- Python — strong AI/ML ecosystem but poor concurrency and deployment story
 ```
 
-### 9.2 Explicit Capture Trigger
+### 10.2 Explicit Capture Trigger
 
 Decisions are captured via **explicit trigger**, not magic detection:
 
@@ -525,7 +534,7 @@ Decisions are captured via **explicit trigger**, not magic detection:
 - **CLI:** `harness decision "We chose X because Y"` — creates ADR directly.
 - **Agent-initiated:** When an agent recognizes it's making a significant choice, it drafts an ADR and requests human approval before merging.
 
-### 9.3 What Qualifies as a Decision
+### 10.3 What Qualifies as a Decision
 
 Not everything is an ADR. Capture when:
 - An architectural or design choice is made that constrains future options
@@ -573,7 +582,7 @@ The default model is one primary agent per human, with shared agents for team-wi
 
 An agent behaves differently depending on context. In a 1:1 DM with its primary human, it's informal, proactive, and has full workspace access. In a group channel, it follows the minimal intrusion principle from §5.6 — respond when mentioned, contribute when valuable, stay silent otherwise. In a cross-team channel where it encounters unfamiliar humans, it defaults to read-only behavior until explicitly engaged. These aren't separate modes to configure; they emerge naturally from the channel policies already defined in `GUARDRAILS.yaml`.
 
-Handoff is a real problem. When a human goes on vacation, their agent doesn't go dark — it continues background work (heartbeats, monitoring, cron tasks) and can be temporarily reassigned to a covering team member. The covering human gets a context briefing: what the agent has been working on, what's pending, what decisions are waiting. This is why daily memory files and `MEMORY.md` exist — they're not just for the agent's benefit, they're the handoff document. A new team member who wants to understand what an agent has been doing reads its memory files, the same way they'd read a colleague's handover notes.
+Handoff is a real problem. When a human goes on vacation, their agent doesn't go dark — it continues background work (heartbeats, monitoring, cron tasks) and can be temporarily reassigned to a covering team member. The covering human gets a context briefing: what the agent has been working on, what's pending, what decisions are waiting. This is why canonical memory exports exist — they're not just for the agent's benefit, they're the handoff document. A new team member who wants to understand what an agent has been doing reads the exported memory artifacts in the repo, the same way they'd read a colleague's handover notes.
 
 ### 13.3 Daily Workflow
 
@@ -581,7 +590,7 @@ A typical day with the harness looks like this: the agent sends a morning summar
 
 Reviewing agent work follows existing developer workflows. Code changes come as PRs that humans review normally. Task completions update Backlog.md entries with a summary of what was done. Decisions that need approval are surfaced explicitly through the approval gates in §5.3 — the agent doesn't bury important decisions in a wall of text, it flags them clearly and waits.
 
-Knowing when to interrupt versus when to stay quiet is one of the hardest UX problems. The harness provides graduated urgency levels: silent (log it, don't message), normal (message in the relevant channel, no notification), urgent (direct message with notification), and critical (multi-channel alert). The default is conservative — most things are normal or silent. Agents learn over time which topics their human considers urgent, and those preferences go into `MEMORY.md` as durable configuration.
+Knowing when to interrupt versus when to stay quiet is one of the hardest UX problems. The harness provides graduated urgency levels: silent (log it, don't message), normal (message in the relevant channel, no notification), urgent (direct message with notification), and critical (multi-channel alert). The default is conservative — most things are normal or silent. Agents learn over time which topics their human considers urgent, and those preferences are stored as Preference memories in the DB and exported to repo.
 
 ### 13.4 Error Communication
 
@@ -618,7 +627,7 @@ You can't manage what you can't see, and agent systems are particularly opaque. 
 
 The basics are token usage and cost, tracked per session, per task, per agent, and per day. The budget system in §5.4 enforces ceilings, but observability tells you *where* the money is going. A research sub-agent that burns 80% of the daily budget on a single query is a pattern you need to see to fix.
 
-Beyond cost: tool call frequency and latency (is the shell tool hanging? is the web fetch timing out consistently?), error rates by type (provider rate limits, tool failures, guardrail violations), memory file growth and vector index health (is the FAISS index stale? has `MEMORY.md` blown past its size limit?), and agent activity patterns (when is it active, what's it doing, how fast is it responding?). For multi-agent setups, add coordination metrics: RPC handoff success rates, messaging latency between agents, message volume in shared channels.
+Beyond cost: tool call frequency and latency (is the shell tool hanging? is the web fetch timing out consistently?), error rates by type (provider rate limits, tool failures, guardrail violations), memory DB health and vector index freshness (is the index stale? are canonical exports lagging?), and agent activity patterns (when is it active, what's it doing, how fast is it responding?). For multi-agent setups, add coordination metrics: RPC handoff success rates, messaging latency between agents, message volume in shared channels.
 
 None of this requires a fancy dashboard on day one. It requires structured data that's queryable after the fact.
 
@@ -661,8 +670,7 @@ Phase 3 extends to cross-agent observability: how are agents interacting, where 
 
 - **Plugin marketplace** — skills are git repos; discovery is manual until scale demands more
 - **Visual agent builder** — no drag-and-drop; code-first
-- **Background parallel bash** — simplicity > parallelism for v1
-- **Notion/Jira/external trackers** — repo-native or nothing
+- **Notion/Jira/external trackers** — repo-native or nothing (PM adapters are Phase 2)
 
 ---
 
@@ -674,7 +682,7 @@ Phase 3 extends to cross-agent observability: how are agents interacting, where 
 4. All SHQ agent operations migrated off OpenClaw (end of week 8)
 5. MEMORY_POLICY.md enforced by linter (end of week 3)
 6. First ADR captured via emoji trigger (end of week 4)
-7. Vector search over memory files returning relevant results (end of week 5)
+7. Hybrid recall over memory DB (vector + full-text) returning relevant results (end of week 5)
 
 ---
 
@@ -750,7 +758,7 @@ Tests are not Phase 2. The golden path E2E ships with the first prototype (Week 
 | Week | Milestone |
 |------|-----------|
 | 1 | Audit: what OpenClaw features we actually use + gap analysis. Set up repo with GitHub Projects, ADR template, MEMORY_POLICY.md. |
-| 2 | Architecture decisions: critical fork resolved (ADR-0001), Mastra dependency decision (ADR-0002), messaging adapter design (ADR-0003). |
+| 2 | Architecture decisions: Rust async model (ADR-0002), messaging adapter design (ADR-0003), vector backend selection (ADR-0004). |
 | 3 | Prototype: single agent on new core, one messaging surface, memory policy enforced by linter. |
 | 4 | Multi-agent: two agents collaborating. Decision capture via emoji trigger working. GitHub Issues/Projects integration. |
 | 5 | Memory: vector index over memory files. Compound capture loop. Dogfood one real SHQ task end-to-end. |
@@ -769,7 +777,7 @@ When sessions exceed the context window, automatically summarize older turns to 
 
 ### 21.2 Validation-Retry Loop (Pydantic AI)
 
-When tool arguments fail schema validation, send the validation error back to the LLM for self-correction instead of failing hard. Pydantic AI does this with Zod/Pydantic schemas — if the agent produces malformed tool calls, the error message becomes part of the next prompt, and the agent fixes its own mistake. This is a small implementation detail with outsized impact on reliability. The PRD mentions Zod/TypeBox validation (§4.4) but doesn't specify this retry behavior. Should be default in the tool execution layer — configurable max retries (default: 3), with the validation error formatted to help the LLM understand what went wrong.
+When tool arguments fail schema validation, send the validation error back to the LLM for self-correction instead of failing hard. Pydantic AI does this with schema validation — if the agent produces malformed tool calls, the error message becomes part of the next prompt, and the agent fixes its own mistake. This is a small implementation detail with outsized impact on reliability. In Rust, serde + the type system handle validation; the retry behavior should be default in the tool execution layer — configurable max retries (default: 3), with the validation error formatted to help the LLM understand what went wrong.
 
 ### 21.3 Structured Output Guarantee (Pydantic AI)
 
