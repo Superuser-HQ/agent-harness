@@ -1,5 +1,5 @@
 # PRD: SHQ Agent Harness
-**Status:** v1.6
+**Status:** v1.7
 **Author:** Kani (driven), Rem (reviewer)
 **Date:** 2026-02-16
 **Stakeholders:** Yao, Gerald
@@ -82,7 +82,7 @@ The core ships with exactly 5 tools. Everything else is an extension.
 
 > **Research validation:** pi-mom's 5 core tools (`bash`, `read`, `write`, `edit`, `attach`) are almost identical. This independent convergence validates the design. pi-mom's self-managing model — where the agent creates its own tools as bash scripts — demonstrates that 5 primitives are sufficient for compound capability growth.
 
-Memory is an **architectural layer**, not a tool (see §4.5). Tools interact with memory through Read/Write (files) and a thin `remember`/`recall` API.
+Memory is an **architectural layer**, not a tool (see §4.5). Tools interact with memory through Read/Write (files) and a thin `remember`/`recall` API backed by the structured memory DB.
 
 ### 4.3 Extension/Skill System
 
@@ -105,23 +105,34 @@ One consequence of this choice: self-managing tools (the pi-mom pattern) mean ag
 - Thinking trace conversion between provider formats
 - Split tool results: structured data for model, clean summary for human
 
-> **Research insight:** Mastra routes 600+ models through a unified layer (wrapping Vercel AI SDK). pi-agent-core provides `setModel()`, `setThinkingLevel()` at runtime. Pydantic AI's validation-retry loop (invalid tool args get sent back to LLM for self-correction) should be ported — use Zod/TypeBox for schema validation.
+> **Research insight:** Mastra routes 600+ models through a unified layer. pi-agent-core provides `setModel()`, `setThinkingLevel()` at runtime. Pydantic AI's validation-retry loop (invalid tool args get sent back to LLM for self-correction) should be ported — use schema validation at the type system level (Rust's type system + serde).
 
 ### 4.5 Memory Layer
 
-Three tiers, all file-based (git-friendly):
+Structured DB for runtime, repo exports for canonical record. Inspired by Spacebot's typed memory graph.
 
-1. **Session memory** — tree-structured conversation history
-2. **Daily memory** — `memory/YYYY-MM-DD.md` raw logs
-3. **Long-term memory** — `MEMORY.md` curated knowledge + `docs/solutions/` tagged, searchable solution docs with YAML frontmatter
+**Storage:** SQLite (structured metadata + graph edges) + vector store (embeddings for semantic recall)
 
-**File-based vector store:** Files remain the source of truth. FAISS or USearch provides an index layer over markdown files for semantic search. No separate database — vectors are derived from files, rebuilt on change. This means `grep` still works, `git diff` still works, and the vector index is a cache, not a store.
+**Memory types:** Fact, Preference, Decision, Identity, Event, Observation, Goal, Todo
 
-> **Research insight:** Mastra has the most sophisticated memory system we found — working memory (structured, persistent), semantic recall (vector-based), and observational memory (background agents maintaining dense observation logs). CrewAI's unified Memory class adds composite scoring (semantic similarity × recency × importance) with tunable weights and self-organizing scope trees. We adopt Mastra's tiered architecture and CrewAI's scoring model, but keep files as ground truth with vectors as index.
+**Graph edges:** RelatedTo, Updates, Contradicts, CausedBy, PartOf
 
-File-based vectors mean memory is portable — clone the repo, rebuild the index, full memory on any machine. This also means search quality depends on file structure, so we need conventions for how memory files are formatted (frontmatter, headers, atomic facts). One tension to flag: git-backed memory creates merge conflicts when multiple agents write simultaneously. Clear ownership per file/section, or append-only patterns, are the mitigation.
+**Recall:** Hybrid — vector similarity + full-text search, merged via Reciprocal Rank Fusion
 
-Memory is git-backed. Multiple agents read/write via shared repo with conventions (clear ownership per section, structured files).
+**Importance scoring:** Access frequency, recency, graph centrality. Identity memories exempt from decay.
+
+**Creation paths:** Agent-initiated, compactor-initiated, cortex-initiated
+
+**Legibility model:**
+- **DB is runtime cache/index and operational store.**
+- **Repo export is canonical, reviewable, and portable record.**
+- Every canonical memory class (Decision, Identity, long-lived Fact, Goal state transitions) must export to versioned files in the repo.
+- Import/export determinism required: same DB snapshot → same exported artifacts.
+- Recovery drill: rebuild fresh DB from canonical exports must pass before production cutover.
+
+> **Research insight:** Mastra's tiered architecture (working memory, semantic recall, observational memory) and CrewAI's composite scoring (semantic similarity × recency × importance with tunable weights) informed this design. Spacebot validates the typed graph approach in production — 8 memory types with graph edges, hybrid recall via RRF, and a Cortex process that maintains the graph.
+
+Multiple agents share the memory graph with scoped access (per-agent, per-team, global). Cross-agent memory isolation (§5.5) is enforced — agents only see memory they're explicitly granted access to.
 
 ### 4.6 Memory Policy (`MEMORY_POLICY.md`)
 
@@ -170,7 +181,25 @@ Explicit memory policy means new agents onboard faster — they read the policy,
 4. MEMORY_POLICY.md must exist in every agent workspace
 5. ADRs must have status, date, and decision fields
 
-### 4.8 Error Handling & Resilience
+### 4.8 Process Model: Channel / Branch / Worker / Cortex
+
+Inspired by Spacebot's architecture. Split the monolith into specialized concurrent processes.
+
+**Channel** — The user-facing process. Has soul, identity, personality. Always responsive — never blocked by work, never frozen by compaction. Delegates thinking to branches and heavy work to workers.
+
+**Branch** — A fork of the channel's context that goes off to think. Has full conversation history. Operates independently; the channel never sees the working, only the conclusion. Multiple branches run concurrently. Deleted after returning results.
+
+**Worker** — Independent process that does jobs. Gets a specific task, focused system prompt, and task-appropriate tools. No channel context, no personality. Can be fire-and-forget (one-shot tasks) or interactive (long-running, accepts follow-ups).
+
+**Cortex (Supervisor)** — Dedicated process that sees across all channels, workers, and branches. v1 scope limited to:
+- Worker/branch supervision (stuck process cleanup, retries, kill policies)
+- Health signals and alerts (queue depth, failure rate, memory sync lag, process liveness)
+
+Deferred to post-v1: pattern mining, memory bulletins, admin chat interface.
+
+> **Research validation:** Spacebot validates this architecture in production for teams/communities. The key insight: a channel that never blocks means 50 users can interact simultaneously. The delegation model means thinking, executing, and responding happen concurrently, not sequentially.
+
+### 4.9 Error Handling & Resilience
 
 - **Retry with backoff** — automatic retry on transient failures (rate limits, network errors)
 - **Provider failover** — if provider X is down, fall back to provider Y automatically
@@ -408,7 +437,7 @@ Channel-agnostic messaging is our **core differentiator** — no existing framew
 - **Channel policies** — allowlists, denylists, requireMention, allowBots per channel
 - **Proactive messaging** — heartbeat + cron system for agents that act without being asked
 
-> **Research insight:** nanobot's channel gateway pattern is the closest prior art — a central `nanobot gateway` process multiplexes across 9+ chat platforms (Telegram, Discord, WhatsApp, Slack, Email, QQ, Feishu, DingTalk, Mochat) via config-driven adapters. We study this architecture deeply but build in TypeScript with stronger typing and plugin isolation.
+> **Research insight:** nanobot's channel gateway pattern is the closest prior art — a central `nanobot gateway` process multiplexes across 9+ chat platforms (Telegram, Discord, WhatsApp, Slack, Email, QQ, Feishu, DingTalk, Mochat) via config-driven adapters. We study this architecture deeply and build with strong typing and plugin isolation in Rust.
 
 Channel abstraction means agents are platform-independent — migrate from Slack to Discord without touching agent logic. It also makes cross-platform coordination natural: an agent can receive a task on Slack and report results on Telegram. Worth noting: platform-specific formatting rules create a growing compatibility matrix that needs automated tests per platform to catch regressions.
 
@@ -649,96 +678,56 @@ Phase 3 extends to cross-agent observability: how are agents interacting, where 
 
 ---
 
-## 17. Critical Fork: Build vs. Wrap pi-agent-core
+## 17. Critical Fork: Build vs. Wrap — RESOLVED
 
-This is THE architectural decision. It must be resolved in Week 2.
+### Decision: Build own core in Rust, port patterns aggressively.
 
-### Option A: Wrap pi-agent-core
+The pi-agent-core wrapping option (TypeScript) is no longer applicable — we've committed to Rust as the runtime language. Spacebot validates Rust for this domain: single binary, zero deps, high concurrency for the Channel/Branch/Worker/Cortex process model.
 
-**What we get for free:**
-- Session state management, event streaming, tool execution, context management
-- TypeScript, MIT licensed, same 5 primitives we'd build anyway
-- `transformContext() → convertToLlm()` message pipeline
-- Steering messages (interrupt running agents) and follow-up queues
-- Dynamic model/tool swapping at runtime
-- Saves 2-3 weeks of core loop development
+**Patterns to port from research (language-agnostic):**
 
-**What we fight:**
-- Terminal-first assumptions — pi-agent-core is built for coding agents, not messaging-first agents
-- Flat history only — no session trees
-- No multi-agent awareness in the core
-- Monorepo coupling — extracting pi-agent-core pulls in pi-ai and potentially more
-- Dependency on Mario Zechner's maintenance priorities and roadmap
-- Context compaction assumes terminal interaction patterns
-
-### Option B: Build own core, port patterns
-
-**What we get:**
-- Messaging-first from day one — session model designed for channel abstraction
-- Session trees native in the core
-- Multi-agent primitives baked in, not bolted on
-- Full control over maintenance and roadmap
-- Clean dependency tree
-
-**What it costs:**
-- 4-5 weeks additional development for agent loop, event system, context management, session trees, multi-provider abstraction, and error handling (corrected from initial 2-3 week estimate — that was optimistic)
-- Risk of re-inventing solved problems
-- Smaller community (just us) vs. pi-mono's existing users
-
-### Tradeoff Analysis
-
-| Dimension | Wrap pi-agent-core | Build own |
-|---|---|---|
-| Time to first agent | ~1 week | ~3 weeks |
-| Time to messaging-first | ~3 weeks (fighting abstractions) | ~3 weeks (building right) |
-| Time to multi-agent | ~5 weeks (bolting on) | ~5 weeks (native, but done right) |
-| Long-term maintenance | Upstream dependency risk | Full ownership |
-| Architecture fit | 70% match | 100% match |
-
-### Recommendation
-
-**Build own core, steal patterns aggressively.** The patterns from pi-agent-core (event model, message pipeline, steering, context compaction) are more valuable than the code. We adopt the *design* but own the *implementation*. Specific patterns to port:
-
+From pi-agent-core:
 1. Event streaming architecture (granular events for UI, logging, inter-agent coordination)
 2. Message flow pipeline (app messages → transform → LLM messages)
 3. Steering and follow-up queues
 4. Context compaction strategy
 5. Dynamic model/tool swapping
 
-From Mastra, additionally adopt:
-- Working memory as structured, persistent state (not just conversation history)
-- Observational memory pattern (background agents maintaining dense observation logs)
+From Spacebot:
+1. Channel/Branch/Worker/Cortex process separation
+2. Message coalescing for group chats
+3. Model routing by process type (expensive for channels, cheap for workers)
+4. Non-blocking compaction as background process
+5. Typed memory graph with hybrid recall (RRF)
 
-From CrewAI, additionally adopt:
+From Mastra:
+- Working memory as structured, persistent state
+- Observational memory pattern
+
+From CrewAI:
 - Composite memory scoring (semantic × recency × importance with tunable weights)
-- Scope tree concept for hierarchical memory organization
 
-### Decision Status: **PENDING — requires human (Yao) approval.**
+### Decision Status: **ACCEPTED** (Yao, 2026-02-17)
 
 ---
 
 ## 18. Key Decisions & Open Questions
 
-### Resolved (Kani + Rem aligned, pending human approval):
-- **Language/runtime:** TypeScript/Node.js — matches OpenClaw, zero ramp-up, strong ecosystem
+### Resolved:
+- **Language/runtime:** Rust — single binary, zero deps, validated by Spacebot in same domain. (Accepted 2026-02-17)
+- **Memory store:** Structured DB (SQLite + vector store) with typed memory graph. Repo exports as canonical record. (Accepted 2026-02-17)
+- **Process model:** Channel/Branch/Worker/Cortex — concurrent specialized processes. (Accepted 2026-02-17)
+- **Cortex:** In v1, scoped to process supervision + health signals only. (Accepted 2026-02-17)
+- **Core loop:** Build own, port patterns from pi-agent-core, Spacebot, Mastra, CrewAI. (Accepted 2026-02-17)
 - **License:** Apache 2.0 — permissive with patent protection
 - **Governance:** SHQ-owned to start, foundation later if traction warrants
 - **Task tracking:** Repo-native (backlog.md + GitHub Issues/Projects). No Notion.
 - **Decision records:** Git-based ADRs with explicit capture triggers
-- **Memory store:** File-based with FAISS/USearch vector index. Files are truth, vectors are cache.
-
-### Critical Fork #2: Mastra as Dependency
-This is on par with the pi-agent-core decision. Mastra is the strongest architectural match (TypeScript, memory, MCP, workflows). Three options:
-- **A) Depend on Mastra** — use as library for agent primitives, memory, and workflows. Fast start, upstream dependency risk.
-- **B) Fork patterns** — study Mastra's architecture, reimplement in our core. Slower, full ownership.
-- **C) Complement** — use Mastra for what it does well (memory, workflows), build our own for what it doesn't (messaging, session trees). Mix-and-match.
-
-Needs hands-on evaluation in Week 2. **Decision Status: PENDING.**
 
 ### Open:
-- **Name?** Working title TBD. Short, memorable, not taken on npm.
+- **Name?** Working title TBD. Short, memorable.
 - **Messaging adapter architecture?** Study nanobot's gateway pattern, then design. Port OpenClaw's adapter pattern or design fresh?
-- **Vector store choice?** FAISS (mature, C++ with Node bindings) vs USearch (newer, potentially faster, better Node support). Benchmark needed.
+- **Vector store choice?** Benchmark needed for Rust-native options (lance, qdrant-client, usearch).
 
 ---
 
@@ -746,7 +735,7 @@ Needs hands-on evaluation in Week 2. **Decision Status: PENDING.**
 
 Agent frameworks are notoriously hard to test. Our approach:
 
-1. **Unit tests** — tool implementations, message formatting, memory read/write, vector index operations. Standard Jest/Vitest.
+1. **Unit tests** — tool implementations, message formatting, memory read/write, vector index operations. Rust's built-in test framework.
 2. **Integration tests** — messaging adapters (mock Slack/Telegram APIs), LLM abstraction (mock provider responses), session lifecycle (create → branch → merge → prune).
 3. **Golden path E2E** — send message → agent processes → tools execute → response delivered → memory updated. One test per messaging surface. Run on every PR.
 4. **Replay tests** — record real agent sessions, replay against new code to catch regressions in behavior (not just API contracts).
@@ -796,7 +785,7 @@ OpenHands separates agent behavior into Actions (what the agent wants to do) and
 
 ### 21.6 Typed Dependency Injection (Pydantic AI)
 
-Tools need runtime context — database connections, API clients, user identity, configuration. Pydantic AI's `RunContext[Deps]` pattern passes these as typed dependencies rather than global state or environment variables. In TypeScript, this becomes generic tool definitions: `Tool<Deps>` where `Deps` is a typed object injected at runtime. This matters for testing (inject mocks instead of real services), for multi-tenant setups (different deps per user), and for security (tools only see the deps they're given, not everything in the environment).
+Tools need runtime context — database connections, API clients, user identity, configuration. Pydantic AI's `RunContext[Deps]` pattern passes these as typed dependencies rather than global state or environment variables. In Rust, this maps naturally to generic tool definitions with typed context parameters, leveraging the trait system for dependency injection. This matters for testing (inject mocks instead of real services), for multi-tenant setups (different deps per user), and for security (tools only see the deps they're given, not everything in the environment).
 
 ### 21.7 Custom Agent Distributions (Goose)
 
@@ -833,6 +822,7 @@ Run these on every PR. If a scenario regresses, the PR doesn't merge. This is th
 
 - [OpenAI Harness Engineering](https://openai.com/index/harness-engineering/)
 - [Compound Engineering (Kieran Klaassen / Cora)](https://every.to/guides/compound-engineering)
+- [Spacebot (Spacedrive)](https://github.com/spacedriveapp/spacebot) — Rust agent harness, Channel/Branch/Worker/Cortex architecture, typed memory graph
 - [Pi-AI architecture (pi-mono)](https://github.com/badlogic/pi-mono)
 - [Mastra framework](https://mastra.ai) — TypeScript agent framework, strongest architectural match
 - [CrewAI](https://docs.crewai.com) — Multi-agent orchestration, unified memory with composite scoring
