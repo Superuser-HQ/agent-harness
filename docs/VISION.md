@@ -20,7 +20,9 @@ But we don't need to replicate any existing platform. We need to build the *smal
 
 We audited 9 frameworks (Mastra, CrewAI, Goose, AgentStack, nanobot, OpenHands, Pydantic AI, pi-agent-core, pi-mom). The finding is unambiguous:
 
-> **No framework has channel abstraction.** Zero. This is our differentiator.
+> **No _agent_ framework has channel abstraction.** Zero. This is our differentiator.[^1]
+
+[^1]: Chatbot-focused frameworks (Botpress, Rasa) do have channel abstraction, but lack the agent harness model — memory continuity, compound engineering, and skill composability. We audited 9 agent frameworks: Mastra, CrewAI, Goose, AgentStack, nanobot, OpenHands, Pydantic AI, pi-agent-core, pi-mom.
 
 The market has mature solutions for agent reasoning, memory, tool systems, multi-agent orchestration, and workflows. But nobody has built channel-agnostic agent deployment with unified messaging. That's the gap, and that's what we build.
 

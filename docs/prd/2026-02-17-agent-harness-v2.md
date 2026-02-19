@@ -123,9 +123,10 @@ Feature milestones alone are insufficient. v1 exits only if reliability targets 
 ### Phase 0 (Week 1): Scope Lock + Foundations
 - Finalize used-feature audit (only SHQ-used flows)
 - Define canonical memory classes + export schema
+- **Author ADR-0005: Export Schema Versioning** — schema version field in every export artifact, forward-compatible reader, CI test that old exports still import. Must be merged before first export lands. (Committed in [earlier thread](https://github.com/Superuser-HQ/agent-harness); tracked as non-optional.)
 - Stand up Rust skeleton + CI + architecture lint scaffolding
 
-**Gate G0 → G1:** Signed v1 scope (cuts accepted). Ownership assigned for runtime, memory, integration.
+**Gate G0 → G1:** Signed v1 scope (cuts accepted). Ownership assigned for runtime, memory, integration. ADR-0005 merged.
 
 ### Phase 1 (Weeks 2-3): Single-Agent Vertical Slice
 - Main/branch sessions working
