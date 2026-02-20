@@ -19,7 +19,7 @@ An agent harness — not a chatbot framework — that treats scaffolding, feedba
 
 ## Docs
 
-- [PRD](docs/prd-agent-harness.md) — Product Requirements Document
+- [PRD](docs/prd-superagents.md) — Product Requirements Document
 
 ## Contributing
 

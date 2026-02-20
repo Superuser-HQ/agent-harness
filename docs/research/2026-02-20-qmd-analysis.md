@@ -131,10 +131,10 @@ QMD and Cognee operate at different layers and compose cleanly:
 
 QMD answers "find this fact." Cognee answers "how does this connect to that?"
 
-The proposed architecture feeds the same canonical markdown exports (ADR-0005) to both tools. Query routing decides which layer to hit based on query type.
+The proposed architecture feeds the same canonical markdown exports (ADR-0002) to both tools. Query routing decides which layer to hit based on query type.
 
 See: `research/2026-02-20-cognee-analysis.md` for the full Cognee evaluation.  
-See: ADR-0006 (QMD as recall engine), ADR-0007 (two-tier architecture — pending spike).
+See: ADR-0003 (QMD as recall engine), ADR-0007 (two-tier architecture — pending spike).
 
 ---
 
@@ -144,6 +144,6 @@ See: ADR-0006 (QMD as recall engine), ADR-0007 (two-tier architecture — pendin
 - [OpenClaw + QMD memory post](https://www.josecasanova.com/blog/openclaw-qmd-memory) — someone already doing this with OpenClaw
 - [Cognee GitHub](https://github.com/topoteretes/cognee)
 - ADR-0002 (memory model — SQLite + vector)
-- ADR-0005 (export schema versioning)
-- ADR-0006 (QMD as recall engine)
+- ADR-0002 (export schema versioning)
+- ADR-0003 (QMD as recall engine)
 - v1 PRD §4.5 (Memory), §4.7 (Repo Export Pipeline)

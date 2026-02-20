@@ -29,7 +29,7 @@ impl RecallQuery {
     }
 }
 
-/// Memory store interface — backed by LanceDB (ADR-0006)
+/// Memory store interface — backed by LanceDB (ADR-0003)
 ///
 /// Implementation is in `store_impl` (not yet wired — Phase 1).
 /// This trait defines the contract that the agent loop depends on.
@@ -60,10 +60,40 @@ impl MemoryStore {
         todo!("MemoryStore::recall not yet implemented")
     }
 
-    /// Export canonical records to markdown (ADR-0005 pipeline)
+    /// Export canonical records to markdown (ADR-0002 pipeline)
     /// Called on schedule by Cortex and on explicit checkpoint events
     pub async fn export_canonical(&self, _output_dir: &str) -> Result<()> {
-        // TODO: Phase 2 — export schema versioned per ADR-0005
+        // TODO: Phase 2 — export schema versioned per ADR-0002
         todo!("MemoryStore::export_canonical not yet implemented")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::record::MemoryType;
+
+    #[test]
+    fn recall_query_defaults() {
+        let q = RecallQuery::new("LanceDB decision");
+        assert_eq!(q.text, "LanceDB decision");
+        assert_eq!(q.limit, 10);
+        assert!(q.filter_type.is_none());
+    }
+
+    #[test]
+    fn recall_query_builder() {
+        let q = RecallQuery::new("runtime choice")
+            .limit(5)
+            .filter_type(MemoryType::Decision);
+        assert_eq!(q.limit, 5);
+        assert_eq!(q.filter_type, Some(MemoryType::Decision));
+    }
+
+    #[test]
+    fn recall_query_limit_zero_allowed() {
+        // limit(0) is valid — callers control this
+        let q = RecallQuery::new("test").limit(0);
+        assert_eq!(q.limit, 0);
     }
 }

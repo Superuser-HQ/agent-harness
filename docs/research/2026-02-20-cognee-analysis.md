@@ -85,7 +85,7 @@ QMD and Cognee solve different layers of the memory problem and compose cleanly:
                     ┌──────────────────┐    └── Relational/contextual query
                     │ Versioned        │                  ▼
                     │ Markdown Exports │            ┌─────────┐
-                    │ (ADR-0005 schema)│            │ Cognee  │  (graph traversal + semantic)
+                    │ (ADR-0002 schema)│            │ Cognee  │  (graph traversal + semantic)
                     └────┬────────────┘            └─────────┘
                          │              │
                          └──── QMD ─────┘ (indexes exports for fast recall)
@@ -95,7 +95,7 @@ QMD and Cognee solve different layers of the memory problem and compose cleanly:
 
 **Write path:** Agent → SQLite (typed, structured, high-frequency writes)
 
-**Canonical sync:** SQLite exports to versioned markdown files (per ADR-0005)
+**Canonical sync:** SQLite exports to versioned markdown files (per ADR-0002)
 
 **Fast recall (QMD):** Indexes the markdown exports. Sub-second BM25 + vector + reranker. Handles: "What did we decide about X?", "Find the relevant session from last week."
 
@@ -113,7 +113,7 @@ QMD and Cognee solve different layers of the memory problem and compose cleanly:
 | Graph edges between Decision/Identity/Fact records | Cognee ✓ |
 | Sub-second agent recall during task execution | QMD ✓ |
 | Cross-session relational reasoning | Cognee ✓ |
-| Canonical export as source of truth | SQLite → markdown (ADR-0005) → feeds both |
+| Canonical export as source of truth | SQLite → markdown (ADR-0002) → feeds both |
 
 Cognee could replace the need to build a custom graph layer in Rust — which was an open question in the PRD.
 

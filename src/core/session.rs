@@ -35,7 +35,7 @@ pub enum SessionKind {
     Main,
     /// Scoped task session — spawned by Main or another Branch,
     /// writes results back to parent on completion, then is pruned
-    /// (audit trail is preserved before deletion — see ADR-0005)
+    /// (audit trail is preserved before deletion — see ADR-0002)
     Branch { parent: SessionId },
 }
 

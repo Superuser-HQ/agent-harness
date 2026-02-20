@@ -14,7 +14,7 @@ Superagents needs a runtime language for the core agent loop, session tree, memo
 Key constraints:
 - **Single binary deployment** — no install-time runtime dependencies (no `npm install`, no `pip install`, no Python or Node on the host)
 - **Low memory footprint** — agents run persistently, potentially many concurrent sessions
-- **Embedded memory store** — LanceDB (ADR-0006) is a Rust crate; the runtime must be Rust to use it natively without FFI overhead
+- **Embedded memory store** — LanceDB (ADR-0003) is a Rust crate; the runtime must be Rust to use it natively without FFI overhead
 - **Correctness** — multi-agent concurrent memory writes require strong concurrency guarantees
 - **Team size** — 2-3 engineers for 8 weeks; no room for runtime/ecosystem debugging
 
@@ -40,7 +40,7 @@ The Spacebot project (Spacedrive's production AI integration) uses Rust for exac
 
 ### LanceDB native integration
 
-ADR-0006 locked LanceDB as the memory store. LanceDB's primary interface is a Rust crate. Alternatives:
+ADR-0003 locked LanceDB as the memory store. LanceDB's primary interface is a Rust crate. Alternatives:
 - Python: via PyLance (wrapper, overhead, extra runtime)
 - TypeScript: no official LanceDB Rust-to-TS bridge; would require subprocess or HTTP server
 
@@ -81,5 +81,5 @@ Multi-agent writes to a shared memory store are the primary source of correctnes
 ## References
 
 - `docs/research/2026-02-17-spacebot-analysis.md` — Spacebot (Spacedrive) Rust agent architecture
-- ADR-0006 — LanceDB as memory store (Rust crate dependency)
+- ADR-0003 — LanceDB as memory store (Rust crate dependency)
 - PRD v2 §5 (Architecture Decisions): "Runtime language: Rust"

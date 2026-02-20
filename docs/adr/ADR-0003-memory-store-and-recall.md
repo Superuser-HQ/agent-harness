@@ -1,10 +1,10 @@
-# ADR-0006: Memory Store and Recall Engine
+# ADR-0003: Memory Store and Recall Engine
 
 **Status:** Accepted  
 **Date:** 2026-02-20  
 **Authors:** Rem, Kani, Gerald, Yao  
 **Deciders:** Yao, Rem, Kani, Gerald  
-**Supersedes:** ADR-0006 draft (QMD as recall engine)
+**Supersedes:** ADR-0003 draft (QMD as recall engine)
 
 ---
 
@@ -118,7 +118,7 @@ Phase 0: LanceDB hybrid search (vector + FTS) without reranking. Acceptable for 
 Future: Add a reranking post-processing step (cross-encoder model) once the storage architecture is stable. QMD's Qwen3 reranker architecture is the reference implementation.
 
 ### Canonical export (git-synced memory)
-LanceDB is the runtime store. The canonical export pipeline (ADR-0005) still applies — periodic export to versioned markdown for human readability, git history, and disaster recovery. This export is NOT used for search (LanceDB handles that). It is used for auditability and backup only.
+LanceDB is the runtime store. The canonical export pipeline (ADR-0002) still applies — periodic export to versioned markdown for human readability, git history, and disaster recovery. This export is NOT used for search (LanceDB handles that). It is used for auditability and backup only.
 
 ---
 
@@ -126,7 +126,7 @@ LanceDB is the runtime store. The canonical export pipeline (ADR-0005) still app
 
 This ADR supersedes the open question in PRD v2 §4.1 ("Vector store choice?"). The benchmark is closed.
 
-ADR-0005 (Export Schema Versioning) remains a prerequisite — canonical exports must have versioned schemas.
+ADR-0002 (Export Schema Versioning) remains a prerequisite — canonical exports must have versioned schemas.
 
 Research that informed this decision is preserved in PR #2 (`research/qmd-memory-search`):
 - `research/2026-02-20-qmd-analysis.md`

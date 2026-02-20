@@ -34,7 +34,7 @@ impl std::fmt::Display for MemoryType {
 /// A single memory record stored in LanceDB
 ///
 /// The `embedding` field is populated by the store before write.
-/// All canonical types are eligible for export via the ADR-0005 pipeline.
+/// All canonical types are eligible for export via the ADR-0002 pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryRecord {
     /// Unique ID

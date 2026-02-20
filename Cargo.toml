@@ -34,7 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # CLI
 clap = { version = "4", features = ["derive"] }
 
-# Memory store — ADR-0006 (LanceDB: single write + recall engine)
+# Memory store — ADR-0003 (LanceDB: single write + recall engine)
 lancedb = "0.26"
 arrow-array = "57"
 arrow-schema = "57"

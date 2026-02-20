@@ -69,3 +69,31 @@ pub struct HealthSnapshot {
     /// None if no export has run yet
     pub memory_export_lag_secs: Option<u64>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cortex_default_stuck_timeout() {
+        let c = Cortex::new();
+        assert_eq!(c.stuck_timeout, std::time::Duration::from_secs(60));
+    }
+
+    #[test]
+    fn cortex_default_trait() {
+        // Default and new() produce the same configuration
+        let c1 = Cortex::new();
+        let c2 = Cortex::default();
+        assert_eq!(c1.stuck_timeout, c2.stuck_timeout);
+    }
+
+    #[tokio::test]
+    async fn health_snapshot_initial_state() {
+        let c = Cortex::new();
+        let h = c.health_snapshot().await;
+        assert_eq!(h.active_sessions, 0);
+        assert_eq!(h.stuck_sessions, 0);
+        assert!(h.memory_export_lag_secs.is_none());
+    }
+}

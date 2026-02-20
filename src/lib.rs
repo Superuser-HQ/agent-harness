@@ -4,7 +4,7 @@ pub mod core;
 /// Tool interface — all agent capabilities implement Tool
 pub mod tools;
 
-/// Memory store and recall (LanceDB — ADR-0006)
+/// Memory store and recall (LanceDB — ADR-0003)
 pub mod memory;
 
 /// Messaging surface abstraction (ADR-0003)

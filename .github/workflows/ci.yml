@@ -74,17 +74,11 @@ jobs:
           fi
           echo "OK: memory boundary clean"
 
-  # Docs freshness gate (Phase 2 — placeholder)
-  # TODO: enforce that ADR index and export schema version are in sync
-  docs-gate:
-    name: Docs Freshness
+  # Schema changelog coverage — ensures every MemoryType variant is documented
+  schema-lint:
+    name: Schema Changelog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check ADR directory exists
-        run: |
-          if [ ! -d "docs/adr" ]; then
-            echo "FAIL: docs/adr directory missing"
-            exit 1
-          fi
-          echo "OK: docs/adr present ($(ls docs/adr | wc -l) ADRs)"
+      - name: Validate schema changelog coverage
+        run: bash scripts/check-schema-changelog.sh

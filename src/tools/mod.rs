@@ -42,3 +42,46 @@ pub trait Tool: Send + Sync {
     fn tier(&self) -> ToolTier;
     async fn invoke(&self, call: ToolCall) -> Result<ToolResult>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_tier_ordering() {
+        assert!(ToolTier::Read < ToolTier::Write);
+        assert!(ToolTier::Write < ToolTier::Network);
+        assert!(ToolTier::Network < ToolTier::Destructive);
+    }
+
+    #[test]
+    fn tool_call_construction() {
+        let call = ToolCall {
+            name: "read_file".to_string(),
+            params: serde_json::json!({"path": "/tmp/test"}),
+        };
+        assert_eq!(call.name, "read_file");
+    }
+
+    #[test]
+    fn tool_result_success() {
+        let result = ToolResult {
+            success: true,
+            output: serde_json::json!({"content": "hello"}),
+            error: None,
+        };
+        assert!(result.success);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn tool_result_failure() {
+        let result = ToolResult {
+            success: false,
+            output: serde_json::Value::Null,
+            error: Some("file not found".to_string()),
+        };
+        assert!(!result.success);
+        assert_eq!(result.error.as_deref(), Some("file not found"));
+    }
+}

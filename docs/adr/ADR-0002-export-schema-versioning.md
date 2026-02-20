@@ -1,4 +1,4 @@
-# ADR-0005: Memory Export Schema Versioning
+# ADR-0002: Memory Export Schema Versioning
 
 **Status:** Draft  
 **Date:** 2026-02-20  

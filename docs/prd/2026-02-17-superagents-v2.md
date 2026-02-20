@@ -123,10 +123,10 @@ Feature milestones alone are insufficient. v1 exits only if reliability targets 
 ### Phase 0 (Week 1): Scope Lock + Foundations
 - Finalize used-feature audit (only SHQ-used flows)
 - Define canonical memory classes + export schema
-- **Author ADR-0005: Export Schema Versioning** — schema version field in every export artifact, forward-compatible reader, CI test that old exports still import. Must be merged before first export lands. (Committed in [earlier thread](https://github.com/Superuser-HQ/agent-harness); tracked as non-optional.)
+- **Author ADR-0002: Export Schema Versioning** — schema version field in every export artifact, forward-compatible reader, CI test that old exports still import. Must be merged before first export lands. (Committed in [earlier thread](https://github.com/Superuser-HQ/superagents); tracked as non-optional.)
 - Stand up Rust skeleton + CI + architecture lint scaffolding
 
-**Gate G0 → G1:** Signed v1 scope (cuts accepted). Ownership assigned for runtime, memory, integration. ADR-0005 merged.
+**Gate G0 → G1:** Signed v1 scope (cuts accepted). Ownership assigned for runtime, memory, integration. ADR-0002 merged.
 
 ### Phase 1 (Weeks 2-3): Single-Agent Vertical Slice
 - Main/branch sessions working
@@ -245,16 +245,11 @@ Golden path E2E ships with the first prototype (Week 3).
 
 ## 15. Open Questions
 
-- **Name?** Three options — pick one by end of Week 1 or it defaults to `superagents`:
-  1. `superagents` — clear, describes the product, matches the GitHub repo
-  2. `kora` — short, memorable, no prior art in agent space
-  3. `harness` — describes the concept precisely (scaffolding, not the agent itself)
-  Decision needed from: Yao + Gerald.
 - **Messaging adapter architecture?** Study nanobot's gateway pattern, then design.
 - **Vector store choice?** Benchmark Rust-native options (lance, qdrant-client, usearch).
 
 ## 16. Document Sync Note
 
-- `research/agent-harness/spacebot-analysis.md` is a **pre-decision snapshot** (2026-02-17), not a live spec.
-- `docs/prd/2026-02-16-agent-harness.md` (v1.8) is the original full-scope PRD — retained as reference.
+- `research/superagents/spacebot-analysis.md` is a **pre-decision snapshot** (2026-02-17), not a live spec.
+- `docs/prd/2026-02-16-superagents-v1.md` (v1.8) is the original full-scope PRD — retained as reference.
 - This document is the **decision-bearing document** for v1 scope and priorities.
