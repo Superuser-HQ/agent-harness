@@ -5,7 +5,6 @@
 /// without knowing which surface is active.
 ///
 /// v1: One primary surface. Second surface is Phase 3, behind reliability gate.
-
 use anyhow::Result;
 use async_trait::async_trait;
 

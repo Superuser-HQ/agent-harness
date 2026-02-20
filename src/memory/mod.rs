@@ -11,7 +11,6 @@
 /// Canonical export pipeline (ADR-0005) runs on schedule and writes
 /// versioned markdown to the repo. That export is for auditability + backup
 /// ONLY — LanceDB handles all runtime search/recall.
-
 pub mod record;
 pub mod store;
 

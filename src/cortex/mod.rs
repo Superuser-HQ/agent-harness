@@ -14,7 +14,6 @@
 /// SLOs enforced by Cortex (from PRD §7):
 ///   - Stuck worker detection: <= 60s median, <= 5m max cleanup
 ///   - Process crash-free: >= 99.5% daily uptime
-
 use std::time::Duration;
 
 /// Cortex supervisor handle
@@ -38,7 +37,10 @@ impl Cortex {
         // - Poll session registry for stuck workers
         // - Emit health signals on configurable interval
         // - Trigger cleanup/retry per kill policy
-        tracing::info!("Cortex supervisor starting (stuck_timeout={:?})", self.stuck_timeout);
+        tracing::info!(
+            "Cortex supervisor starting (stuck_timeout={:?})",
+            self.stuck_timeout
+        );
         todo!("Cortex::run not yet implemented")
     }
 
