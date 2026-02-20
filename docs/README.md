@@ -14,7 +14,7 @@
 
 Date-prefixed: `[yyyy-mm-dd]-title.md`
 
-Example: `prd/2026-02-16-agent-harness.md`
+Example: `prd/2026-02-16-superagents-v1.md`
 
 Dates are self-assigning (no coordination needed) and give instant context on when a doc was written.
 

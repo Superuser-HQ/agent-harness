@@ -1,6 +1,6 @@
 # Vision: SHQ Agent Harness
 
-> A living document capturing the long-term vision and aspirations for the agent harness. For current execution plans, see the [v1 PRD](prd/2026-02-17-agent-harness-v2.md). For phasing, see the [Roadmap](ROADMAP.md).
+> A living document capturing the long-term vision and aspirations for the agent harness. For current execution plans, see the [v1 PRD](prd/2026-02-17-superagents-v2.md). For phasing, see the [Roadmap](ROADMAP.md).
 
 ---
 

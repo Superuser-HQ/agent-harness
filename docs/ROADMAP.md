@@ -1,6 +1,6 @@
 # Roadmap: SHQ Agent Harness
 
-> Bridge between [VISION.md](VISION.md) (where we're going) and the [v1 PRD](prd/2026-02-17-agent-harness-v2.md) (what we're building now).
+> Bridge between [VISION.md](VISION.md) (where we're going) and the [v1 PRD](prd/2026-02-17-superagents-v2.md) (what we're building now).
 
 ---
 
