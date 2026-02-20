@@ -30,6 +30,7 @@ Requirements for any alternative in this slot:
 
 | Tool | Runtime | Approach | Local | Interface | Reranking | Verdict |
 |------|---------|----------|-------|-----------|-----------|---------|
+| **QMD** ⭐ | Node.js CLI | BM25 + vector + reranking + query expansion | ✅ | CLI + MCP server | ✅ Qwen3 | ✅ **Recommended (ADR-0006)** — full hybrid stack, battle-tested |
 | **MiniSearch** | Node.js (in-memory) | BM25 only | ✅ | JS API only | ❌ | ❌ Too limited — no vector, no reranking |
 | **Meilisearch** | Rust binary (server) | BM25 + vector hybrid | ✅ | REST API | ❌ | ⚠️ Viable but heavyweight (server process required) |
 | **Typesense** | C++ binary (server) | BM25 + semantic hybrid | ✅ | REST API | ❌ | ⚠️ Viable, similar profile to Meilisearch |

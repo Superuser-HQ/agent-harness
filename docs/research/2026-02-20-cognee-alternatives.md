@@ -36,7 +36,8 @@ Requirements for any alternative in this slot:
 
 | Tool | Runtime | Graph Type | Local/Hosted | LLM Required | Temporal Memory | Verdict |
 |------|---------|------------|--------------|--------------|-----------------|---------|
-| **Graphiti** | Python | Temporal KG (Neo4j / FalkorDB) | ✅ Self-hosted | ✅ (Ollama OK) | ✅ Strong | ✅ Best alternative |
+| **Cognee** ⭐ | Python | Entity KG (graph DB + vector) | ✅ Self-hosted | ✅ (Ollama OK) | ⚠️ Limited | ✅ **Recommended (pending spike)** — broad ingestion, modular ECL pipeline |
+| **Graphiti** | Python | Temporal KG (Neo4j / FalkorDB) | ✅ Self-hosted | ✅ (Ollama OK) | ✅ Strong | ✅ Best alternative — may outperform Cognee for structured agent writes |
 | **Mem0** | Python / JS | Directed graph (Neo4j optional) | ✅ Self-hosted | ✅ (Ollama OK) | ⚠️ Limited | ⚠️ Memory management layer, not raw KG |
 | **Zep** | Python | Temporal KG (via Graphiti) | ⚠️ Mostly cloud | ✅ (Ollama OK) | ✅ Strong | ⚠️ Graphiti is the OSS primitive; Zep = managed |
 | **LightRAG** | Python | Entity-relation graph (KG + vector) | ✅ Self-hosted | ✅ (Ollama OK) | ❌ No | ⚠️ Strong for document KG, weak as agent memory |
