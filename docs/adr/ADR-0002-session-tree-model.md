@@ -47,11 +47,13 @@ Every session has:
 
 ### Session kinds
 
-| Kind | Purpose | Has identity/soul? | Sees parent context? | Max depth |
-|------|---------|-------------------|---------------------|-----------|
-| **Main** | Primary human conversation | Yes | N/A (root) | 0 (root) |
-| **Branch** | Sub-task forked from Main or another Branch | Yes (inherits) | Summary only | 3 |
-| **Worker** | Stateless task execution | No | No | 1 (leaf only) |
+| Kind | Purpose | Has identity/soul? | Sees parent context? | Allowed depths |
+|------|---------|-------------------|---------------------|----------------|
+| **Main** | Primary human conversation | Yes | N/A (root) | 0 (root only) |
+| **Branch** | Sub-task forked from Main or another Branch | Yes (inherits) | Summary only | 1–3 |
+| **Worker** | Stateless task execution | No | No | 1–4 (leaf only) |
+
+Depth is counted from root: Main = 0. Max tree depth = 4. A Worker at depth 4 represents the longest path: Main(0) → Branch(1) → Branch(2) → Branch(3) → Worker(4).
 
 - **Main** sessions are long-lived. One per agent per channel. They survive restarts (state persisted to LanceDB + canonical export).
 - **Branch** sessions fork from a parent with a task description and optional context summary. They return a structured result to the parent on completion. Branches can spawn sub-branches up to depth 3.
@@ -71,8 +73,33 @@ Context does NOT flow automatically between sessions. This is deliberate — unb
 | Direction | Mechanism |
 |-----------|-----------|
 | Parent → Child (at spawn) | Explicit `context_summary: String` provided by parent. No automatic history forwarding. |
-| Child → Parent (on completion) | Structured `SessionResult { status, summary, artifacts, memory_ids }`. Parent decides what to incorporate. |
+| Child → Parent (on completion) | Structured `SessionResult` (see below). Parent decides what to incorporate. |
 | Sibling → Sibling | Not allowed directly. Siblings communicate through shared memory (LanceDB) or by routing through the parent. |
+
+### SessionResult
+
+When a child session completes (or fails), it returns a structured result to the parent:
+
+```rust
+struct SessionResult {
+    status: SessionStatus,          // Success | Failure | Cancelled
+    summary: String,                // Human-readable summary of what was done
+    artifacts: Vec<Artifact>,       // Outputs produced
+    memory_ids: Vec<MemoryId>,      // Memory records written during this session
+}
+
+struct Artifact {
+    kind: ArtifactKind,             // File | Blob | Reference
+    path: Option<String>,           // Workspace-relative path (for File)
+    uri: Option<String>,            // URI reference (for Reference — e.g. PR URL, LanceDB record ID)
+    data: Option<Vec<u8>>,          // Inline data (for Blob — small outputs only, <64KB)
+    description: String,            // What this artifact is
+}
+
+enum ArtifactKind { File, Blob, Reference }
+```
+
+**Dead parent edge case:** If a child's result arrives at a parent that has already transitioned to `Completed`, `Failed`, or `Expired`, the result is logged (structured log with session IDs, result summary, and artifact list) and dropped. No buffering — the parent made its decision without this child's input, and retroactively injecting results would violate the parent's completed state. Cortex emits a warning-level event for observability.
 
 ### Lifecycle
 
@@ -179,9 +206,13 @@ OpenClaw's `sessions_spawn` returns a text summary. This loses structure:
 - Cortex must implement orphan cleanup and TTL enforcement
 - LLM abstraction must support creating new conversation contexts from a summary string
 
+### Decided: Model tier policy
+- **Branches** default to parent's model tier. Overridable per-spawn.
+- **Workers** default to the cheapest available tier. Overridable per-spawn.
+- Rationale: branches carry identity and do nuanced work; workers are commodity compute.
+
 ### Open questions
-- **Branch priority:** Should branches inherit parent's model tier, or should workers always use cheaper models? (Leaning toward: configurable per-spawn, default to parent's tier for branches, cheapest tier for workers.)
-- **Cross-agent branches:** Can Agent A spawn a branch owned by Agent B? (Leaning toward: not in v1. Cross-agent coordination goes through shared memory or RPC layer in Phase 2.)
+- **Cross-agent branches:** Can Agent A spawn a branch owned by Agent B? Not in v1. Cross-agent coordination goes through shared memory or the RPC layer (Phase 2).
 
 ---
 
