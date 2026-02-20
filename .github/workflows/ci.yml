@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --all-targets
+
+      - name: Test
+        run: cargo test --all
+
+  # Architecture boundary lint
+  # Enforces that modules don't import across layer boundaries.
+  # Rule: cortex must not import from messaging; messaging must not import from memory directly.
+  # This is a placeholder — extend with cargo-deny or a custom lint script in Phase 1.
+  arch-lint:
+    name: Architecture Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check cortex does not import messaging
+        run: |
+          if grep -r "use crate::messaging" src/cortex/; then
+            echo "FAIL: cortex imports messaging (architecture boundary violation)"
+            exit 1
+          fi
+          echo "OK: cortex/messaging boundary clean"
+
+      - name: Check memory module does not import messaging or cortex
+        run: |
+          if grep -r "use crate::messaging\|use crate::cortex" src/memory/; then
+            echo "FAIL: memory imports messaging or cortex (architecture boundary violation)"
+            exit 1
+          fi
+          echo "OK: memory boundary clean"
+
+  # Docs freshness gate (Phase 2 — placeholder)
+  # TODO: enforce that ADR index and export schema version are in sync
+  docs-gate:
+    name: Docs Freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ADR directory exists
+        run: |
+          if [ ! -d "docs/adr" ]; then
+            echo "FAIL: docs/adr directory missing"
+            exit 1
+          fi
+          echo "OK: docs/adr present ($(ls docs/adr | wc -l) ADRs)"

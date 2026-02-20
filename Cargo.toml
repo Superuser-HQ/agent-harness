@@ -1,0 +1,57 @@
+[package]
+name = "superagents"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Multi-agent harness — channel-agnostic, memory-first, compound engineering"
+repository = "https://github.com/Superuser-HQ/superagents"
+license = "MIT"
+
+[[bin]]
+name = "superagents"
+path = "src/main.rs"
+
+[lib]
+name = "superagents_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Memory store — ADR-0006 (LanceDB: single write + recall engine)
+lancedb = "0.12"
+arrow-array = "52"
+arrow-schema = "52"
+
+# Async traits
+async-trait = "0.1"
+
+# UUIDs for session/memory IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

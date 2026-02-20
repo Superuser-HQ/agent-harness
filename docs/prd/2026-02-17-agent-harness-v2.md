@@ -206,11 +206,11 @@ If cutover degrades operations, rollback within same day.
 
 | Area | Primary | Backup |
 |------|---------|--------|
-| Runtime/Core (Rust loop, sessions, tools) | Engineer A | Engineer B |
-| Memory + canonical export + determinism tests | Engineer B | Engineer A |
-| Messaging integration + cutover + ops runbooks | Engineer C (or shared) | Engineer A |
-| Cortex supervision + health telemetry | A/B shared | — |
-| Mechanical enforcement (lint, CI gates) | B/C shared | — |
+| Runtime/Core (Rust loop, sessions, tools) | Kani | Rem |
+| Memory + canonical export + determinism tests | Rem | Kani |
+| Messaging integration + cutover + ops runbooks | Kani | Rem |
+| Cortex supervision + health telemetry | Kani/Rem shared | — |
+| Mechanical enforcement (lint, CI gates) | Kani/Rem shared | — |
 | Product/acceptance sign-off | Yao + Gerald | — |
 
 No subsystem may have single-point knowledge at release gate.
@@ -245,7 +245,11 @@ Golden path E2E ships with the first prototype (Week 3).
 
 ## 15. Open Questions
 
-- **Name?** Working title TBD.
+- **Name?** Three options — pick one by end of Week 1 or it defaults to `superagents`:
+  1. `superagents` — clear, describes the product, matches the GitHub repo
+  2. `kora` — short, memorable, no prior art in agent space
+  3. `harness` — describes the concept precisely (scaffolding, not the agent itself)
+  Decision needed from: Yao + Gerald.
 - **Messaging adapter architecture?** Study nanobot's gateway pattern, then design.
 - **Vector store choice?** Benchmark Rust-native options (lance, qdrant-client, usearch).
 
