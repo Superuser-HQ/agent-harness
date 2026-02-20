@@ -182,11 +182,60 @@ struct ChannelPolicy {
     denylist: Vec<UserId>,
     /// Debounce window for rapid inbound messages
     debounce_ms: u64,
-    /// Tool restrictions for this channel (tool names that are denied)
-    denied_tools: Vec<String>,
+    /// Abstract permission level — dispatcher maps this to tool availability
+    permission_level: ChannelPermissionLevel,
     /// Whether this channel can receive proactive messages (heartbeat/cron)
     proactive_allowed: bool,
+    /// Ack reaction policy
+    ack: AckPolicy,
 }
+
+enum ChannelPermissionLevel {
+    /// Read-only tools only (e.g., restricted channels)
+    ReadOnly,
+    /// Standard tool set (default)
+    Standard,
+    /// Elevated tools allowed (trusted channels)
+    Elevated,
+}
+
+struct AckPolicy {
+    /// Which messages get ack reactions
+    scope: AckScope,
+    /// Emoji to react with on receipt (e.g., "eyes")
+    on_receipt: Option<String>,
+    /// Emoji to react with on completion (e.g., "white_check_mark")
+    on_complete: Option<String>,
+}
+
+enum AckScope {
+    /// No ack reactions
+    None,
+    /// All inbound messages
+    All,
+    /// Only messages that mention the agent
+    MentionsOnly,
+}
+```
+
+The runtime calls `channel.react(msg_id, policy.ack.on_receipt)` on inbound receipt, and `channel.react(msg_id, policy.ack.on_complete)` after the agent finishes. The channel layer guards against surfaces that don't support reactions (capability check before API call).
+
+**`ChannelPermissionLevel`** replaces the earlier `denied_tools` field. Channels don't know tool names — they express an abstract permission level. The dispatcher maps `ChannelPermissionLevel` to tool availability using the permission tiers from ADR-0004. This keeps the channel layer opaque to tool semantics.
+
+### Rate limiting
+
+Each channel holds its own `RateLimiter` instance — one shared algorithm, per-channel config:
+
+```rust
+struct RateLimiter {
+    msgs_per_second: f64,
+    burst: u32,
+    // token bucket internals
+}
+
+// Constructed per-surface at channel init:
+// SlackChannel::new()  → RateLimiter::new(1.0, 3)
+// TelegramChannel::new() → RateLimiter::new(30.0, 10)
 ```
 
 **Policy enforcement happens at the channel layer boundary**, not in the dispatcher or the agent. When an inbound message arrives:
@@ -321,9 +370,10 @@ Cross-platform routing adds a message broker abstraction between sessions and ch
 - **ADR-0005 (Export Schema):** Channel messages may be exported as part of canonical session history. Export format is independent of surface.
 - **ADR-0006 (Memory Store):** Channel metadata (which surface, which channel ID) is stored as session metadata in LanceDB.
 
-### Open questions
-- **Ack reactions:** OpenClaw auto-reacts to inbound messages (e.g., 👀 on receipt, ✅ on completion). Should this be a channel-layer feature (automatic, configurable per-surface) or an agent-level behaviour? Leaning toward: channel-layer, configurable via policy.
-- **Rate limiting:** Per-surface rate limits (Slack: 1msg/sec, Telegram: 30msg/sec) — enforce in the channel implementation or in a shared rate limiter? Leaning toward: channel implementation, since limits are surface-specific.
+### Resolved questions
+- **Ack reactions:** Channel-layer with runtime lifecycle hooks. `AckPolicy` in `ChannelPolicy` defines scope and emojis. Runtime triggers `on_receipt` and `on_complete` at the appropriate lifecycle points. Channel layer guards against unsupported surfaces.
+- **Rate limiting:** Shared `RateLimiter` algorithm, per-channel instance with surface-specific config. One implementation, N configurations. No cross-channel contention.
+- **Tool restrictions per channel:** Replaced `denied_tools` (layer violation — channels shouldn't know tool names) with `ChannelPermissionLevel` (ReadOnly | Standard | Elevated). Dispatcher maps permission levels to tool availability via ADR-0004 tiers.
 
 ---
 
