@@ -76,6 +76,8 @@ Enforcement:
 - `System`: allowed by default, but can be restricted per-agent or per-channel via policy config.
 - `Elevated`: requires explicit human approval before execution. The runtime presents the tool call to the human and blocks until approved or denied. (Deferred approval pattern from PRD — agent continues other non-blocked work while waiting.)
 
+**Elevated approval from deep branches:** Branches pass Elevated requests up the parent chain until they reach a session with a channel handle (typically Main). The approval prompt is displayed there. The originating branch suspends that tool call while waiting; it can continue other non-Elevated work in the meantime. If the entire parent chain has no channel (theoretical edge case in v1 — shouldn't happen since Main always has one), the request is denied with a `PermissionDenied` error.
+
 ### ToolContext
 
 The execution context passed to every tool invocation:
@@ -173,6 +175,8 @@ Not all tools are available in all session types:
 | Web Fetch | ✅ | ✅ | ✅ |
 
 Workers are read-only by design (ADR-0002). They can search memory and the web, but cannot write files, store memories, or send messages.
+
+**Enforcement mechanism:** Tool availability is enforced structurally via `ToolContext` construction, not dispatcher checks. A Worker's `ToolContext` is constructed with no write handle, no channel handle, and no memory store handle. Tools that require these capabilities (Write, Edit, Shell, Message, Memory Store) structurally cannot execute — they receive `None` for the required handle and return `PermissionDenied` immediately. This is more tamper-proof than dispatcher-level filtering: even if a tool is somehow registered for a Worker session, it cannot mutate anything.
 
 Branches inherit the parent's channel handle for Message tool access — a branch can send messages on behalf of the parent. This is intentional: branches doing research should be able to report progress. Channel policies (ADR-0003) govern what the branch can actually send.
 
