@@ -98,7 +98,7 @@ graph TD
 **Key properties:**
 - Main session is always responsive — it never does heavy work directly
 - Branch sessions fork the Channel's context; Worker sessions start fresh (task prompt only)
-- Branches are deleted after returning results; audit trails remain (per ADR-0002)
+- Branches are deleted after returning results; audit trails remain (per VISION.md: "every decision path is preserved")
 - Nesting is allowed (Branch can spawn Branch), but depth should be kept shallow
 
 ---
@@ -174,6 +174,8 @@ flowchart LR
     KillSwitch --> Channel["📡 Channel"]
     ElevatedOp --> Worker["⚙️ Worker"]
     MorningPriority --> Channel
+    TokenBudget -. "caps tokens per\nsession / task / day" .-> Channel
+    TokenBudget -. "caps tokens per\nsession / task / day" .-> Worker
 
     style KillSwitch fill:#ffcdd2,stroke:#b71c1c
     style ElevatedOp fill:#fff9c4,stroke:#f57f17
@@ -338,10 +340,12 @@ flowchart LR
 
 ## Summary: Who Spawns What
 
-| Actor | Can spawn | Can kill | Supervises |
-|-------|-----------|----------|------------|
+| Actor | Can spawn | Can terminate¹ | Supervises |
+|-------|-----------|----------------|------------|
 | Human | — | Any (kill switch) | Steers via approval gates |
-| Cortex | — | Stuck workers/branches | All processes |
-| Channel | Branch | Own branches | — |
-| Branch | Worker, nested Branch | Own workers | — |
+| Cortex | — | Stuck workers/branches (forceful) | All processes |
+| Channel | Branch | Own branches (lifecycle cleanup) | — |
+| Branch | Worker, nested Branch | Own workers (lifecycle cleanup) | — |
 | Worker | — | — | — |
+
+¹ "Terminate" has two meanings here: Cortex **forcefully kills** stuck processes that exceed the timeout threshold (active intervention). Channel and Branch **clean up** their children after those children return results — this is normal lifecycle completion, not a kill action. The kill switch available to humans bypasses all of this and terminates any process immediately.
